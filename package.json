@@ -1,9 +1,13 @@
 {
-  "name": "wasteland-bot",
+  "name": "wasteland-scourge",
   "version": "1.0.0",
   "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
-    "@mysten/sui": "^1.21.2",
-    "discord.js": "^14.15.3"
+    "discord.js": "^14.15.0",
+    "@mysten/sui.js": "^0.37.1",
+    "dotenv": "^16.4.5"
   }
 }
