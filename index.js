@@ -3,6 +3,7 @@ const { SuiClient, getFullnodeUrl } = require('@mysten/sui/client');
 const { Transaction } = require('@mysten/sui/transactions');
 const { Ed25519Keypair } = require('@mysten/sui/keypairs/ed25519');
 const fs = require('fs');
+const http = require('http'); // Added for ping endpoint
 require('dotenv').config();
 
 const client = new Client({ 
@@ -128,17 +129,15 @@ client.on('messageCreate', async (message) => {
       { name: 'Dust Wretch', hpMin: 20, hpMax: 30, attackMin: 3, attackMax: 5, scrMin: 0.05, scrMax: 0.07 },
       { name: 'Sludge Leech', hpMin: 15, hpMax: 20, attackMin: 5, attackMax: 7, scrMin: 0.02, scrMax: 0.04 },
       { name: 'Iron Maw', hpMin: 40, hpMax: 50, attackMin: 8, attackMax: 10, scrMin: 0.15, scrMax: 0.2 },
-      { name: 'Rad Reaver', hpMin: 35, hpMax: 45, attackMin: 7, attackMax: 9, scrMin: 0.1, scrMax: 0.15 },
-      { name: 'Radiated Scorpion King', hpMin: 50, hpMax: 60, attackMin: 10, attackMax: 12, scrMin: 1, scrMax: 1 }
+      { name: 'Rad Reaver', hpMin: 35, hpMax: 45, attackMin: 7, attackMax: 9, scrMin: 0.1, scrMax: 0.15 }
     ];
     const tierRoll = Math.random();
-    const enemyOptions = tierRoll < setting.tier1Chance ? enemies.slice(0, 4) : enemies.slice(4, 6);
+    const enemyOptions = tierRoll < setting.tier1Chance ? enemies.slice(0, 4) : enemies.slice(4);
     let enemy = enemyOptions[Math.floor(Math.random() * enemyOptions.length)];
     let enemyHp = Math.floor(Math.random() * (enemy.hpMax - enemy.hpMin + 1)) + enemy.hpMin;
     let enemyAttack = Math.floor(Math.random() * (enemy.attackMax - enemy.attackMin + 1)) + enemy.attackMin;
     let loot = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
     let stage = 1;
-    let secondEnemy = null;
 
     const getButtons = (enemyAlive) => new ActionRowBuilder()
       .addComponents(
@@ -188,7 +187,7 @@ client.on('messageCreate', async (message) => {
         } else if (stage === 3 && isDeathsHollow) {
           const scorpionRoll = Math.random();
           if (scorpionRoll < 0.01) {
-            enemy = enemies[6]; // Radiated Scorpion King
+            enemy = { name: 'Radiated Scorpion King', hpMin: 50, hpMax: 60, attackMin: 10, attackMax: 12, scrMin: 1, scrMax: 1 };
           } else {
             enemy = enemies[Math.floor(Math.random() * 2) + 4]; // Iron Maw or Rad Reaver
           }
@@ -255,11 +254,8 @@ client.on('messageCreate', async (message) => {
         collector.stop('death');
       }
 
-      let content = `${player.name} - ${setting.name}\n${update}HP: ${player.hp}, Energy: ${player.energy}/5${enemyHp > 0 ? `\nEnemy HP: ${enemyHp}` : ''}\nPick an action:`;
-      if (stage === 3 && isDeathsHollow && enemyHp > 0) content = `${player.name} - ${setting.name}\nFight: ${enemy.name} (HP: ${enemyHp}) lunges!\n${update}HP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`;
-
       await raidMessage.edit({
-        content: content,
+        content: `${player.name} - ${setting.name}\n${update}HP: ${player.hp}, Energy: ${player.energy}/5${enemyHp > 0 ? `\nEnemy HP: ${enemyHp}` : ''}\nPick an action:`,
         components: player.hp > 0 && (enemyHp > 0 || (enemyHp <= 0 && stage < (isDeathsHollow ? 4 : 3))) ? [getButtons(enemyHp > 0)] : []
       });
       saveState();
@@ -358,3 +354,9 @@ function saveState() {
 }
 
 client.login(TOKEN);
+
+// Ping endpoint for UptimeRobot
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Bot alive');
+}).listen(8080, () => console.log('Ping server on port 8080'));
