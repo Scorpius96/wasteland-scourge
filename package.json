@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "discord.js": "^14.15.0",
-    "@mysten/sui.js": "^0.37.1",
+    "@mysten/sui": "^1.8.0",
     "dotenv": "^16.4.5"
   }
 }
