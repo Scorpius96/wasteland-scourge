@@ -16,6 +16,7 @@ const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
 const WSC_COIN_TYPE = '0x0b8efbace2485175dba014eaca68556c113c111300e44155200d8ba42f93ab9d::wsc::WSC';
 const WSC_PRICE = 0.10;
 const ADMIN_ADDRESS = '0xdbfb5034a49be4deba3f01f1e8455148d4657f0bc4344ac5ad39c0c121f53671';
+const ADMIN_ID = 'YOUR_ADMIN_ID'; // Replace with your Discord ID
 
 const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(ADMIN_PRIVATE_KEY, 'base64'));
@@ -178,7 +179,7 @@ client.on('messageCreate', async (message) => {
         lastRaid: 0,
         lastRegen: Date.now(),
         lastEnergyRegen: Date.now(),
-        inventory: { scavJuice: 0, radPill: 0, cursedItems: [], weapons: [], armor: [], misc: [] }
+        inventory: { scavJuice: 0, radPill: 0, reviveStim: 0, cursedItems: [], weapons: [], armor: [], misc: [] }
       };
       player = gameState.players[message.author.id];
       await message.reply(`Registered as ${player.name} for 20 WSC! Tx: ${wscResult.digest}\nUse !menu to start playing.`);
@@ -224,12 +225,18 @@ client.on('messageCreate', async (message) => {
   }
 
   if (command === 'backup') {
-    if (message.author.id !== 'YOUR_ADMIN_ID') return message.reply('Admin only command.');
+    if (message.author.id !== ADMIN_ID) return message.reply('Admin only command.');
     const stateJson = JSON.stringify(gameState, null, 2);
     await message.reply({
       content: 'Game state backup:',
       files: [{ attachment: Buffer.from(stateJson), name: 'gameState.json' }]
     });
+  }
+
+  if (command === 'reset' && message.author.id === ADMIN_ID) {
+    gameState = { players: {} };
+    saveState();
+    await message.reply('Game state has been reset to empty.');
   }
 });
 
@@ -261,7 +268,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           const timeSinceDeath = now - player.lastRaid;
           if (timeSinceDeath < 24 * 60 * 60 * 1000) {
             const waitRemaining = Math.ceil((24 * 60 * 60 * 1000 - timeSinceDeath) / (60 * 60 * 1000));
-            await interaction.update({ content: `${player.name}, you’re dead! Wait ${waitRemaining} hours to respawn.`, components: [mainMenu(), secondRow()] });
+            await interaction.update({ content: `${player.name}, you’re dead! Wait ${waitRemaining} hours to respawn or use a Revive Stim from the store.`, components: [mainMenu(), secondRow()] });
             return;
           }
         }
@@ -432,6 +439,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           .addComponents(
             new ButtonBuilder().setCustomId('buy_scav_juice').setLabel('Buy Scav Juice (5 SCR)').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('buy_rad_pill').setLabel('Buy Rad Pill (3 SCR)').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('buy_revive_stim').setLabel('Buy Revive Stim (10 SCR)').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
           );
         await interaction.update({
@@ -469,6 +477,24 @@ async function handleMenuInteraction(player, menuMessage, userId) {
         } else {
           await interaction.update({
             content: `${player.name}, not enough SCR! Need 3, have ${player.bunker.scr.toFixed(2)}.`,
+            components: [new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary)
+            )]
+          });
+        }
+      } else if (interaction.customId === 'buy_revive_stim') {
+        if (player.bunker.scr >= 10) {
+          player.bunker.scr -= 10;
+          player.inventory.reviveStim = (player.inventory.reviveStim || 0) + 1;
+          await interaction.update({
+            content: `${player.name}, bought a Revive Stim! Inventory: ${player.inventory.reviveStim} Revive Stims`,
+            components: [new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary)
+            )]
+          });
+        } else {
+          await interaction.update({
+            content: `${player.name}, not enough SCR! Need 10, have ${player.bunker.scr.toFixed(2)}.`,
             components: [new ActionRowBuilder().addComponents(
               new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary)
             )]
@@ -520,9 +546,10 @@ async function handleMenuInteraction(player, menuMessage, userId) {
         });
       } else if (interaction.customId === 'inv_healing') {
         const inv = player.inventory;
-        const healingItems = `Scav Juice: ${inv.scavJuice || 0}\nRad Pills: ${inv.radPill || 0}`;
+        const healingItems = `Scav Juice: ${inv.scavJuice || 0}\nRad Pills: ${inv.radPill || 0}\nRevive Stims: ${inv.reviveStim || 0}`;
         const invMenu = new ActionRowBuilder()
           .addComponents(
+            new ButtonBuilder().setCustomId('use_revive_stim').setLabel('Use Revive Stim').setStyle(ButtonStyle.Success).setDisabled(!(player.hp <= 0 && inv.reviveStim > 0)),
             new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
           );
         await interaction.update({
@@ -540,6 +567,25 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           content: `${player.name}, your misc items:\n${miscItems}`,
           components: [invMenu]
         });
+      } else if (interaction.customId === 'use_revive_stim') {
+        if (player.hp <= 0 && player.inventory.reviveStim > 0) {
+          player.hp = 1;
+          player.inventory.reviveStim -= 1;
+          player.lastRegen = Date.now();
+          await interaction.update({
+            content: `${player.name}, used a Revive Stim! HP restored to 1. Inventory: ${player.inventory.reviveStim} Revive Stims remaining.`,
+            components: [new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
+            )]
+          });
+        } else {
+          await interaction.update({
+            content: `${player.name}, you can only use a Revive Stim when dead and if you have one!`,
+            components: [new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
+            )]
+          });
+        }
       } else if (interaction.customId === 'equip') {
         const rows = [];
         let equipMenu = new ActionRowBuilder();
@@ -625,10 +671,8 @@ async function handleMenuInteraction(player, menuMessage, userId) {
     } catch (error) {
       console.error(`Menu error for ${player.name}:`, error.stack);
       await interaction.deferUpdate().catch(() => {});
-      await menuMessage.edit({
-        content: `${player.name}, an error occurred! Returning to main menu.`,
-        components: [mainMenu(), secondRow()]
-      }).catch(err => console.error('Failed to edit on error:', err));
+      await interaction.message.delete().catch(() => {});
+      await message.channel.send(`${player.name}, an interaction failed! Please use !menu to start again.`);
     }
   });
 
@@ -649,7 +693,7 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
   let loot = { scr: 0, scrapMetal: 0, radWaste: 0 };
   let enemy = getRandomEnemy(setting.tiers);
   let enemyHp = enemy.hp;
-  let hasScavenged = false; // Track if the player has scavenged loot after the first encounter
+  let hasScavenged = false;
   const filter = i => i.user.id === userId;
 
   const raidMenu = () => new ActionRowBuilder()
@@ -748,8 +792,7 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
             )
           ]
         });
-        collector.stop('run');
-        return;
+        return; // Exit the collector to prevent further interactions on this message
       } else if (raidInteraction.customId === 'scavenge_loot') {
         const additionalScr = (Math.random() * 0.05).toFixed(2);
         const scrapChance = Math.random() < 0.5 ? Math.floor(Math.random() * 2) + 1 : 0;
@@ -768,7 +811,7 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
         });
         return;
       } else if (raidInteraction.customId === 'go_further') {
-        await raidInteraction.deferUpdate(); // Defer to avoid timeout
+        await raidInteraction.deferUpdate();
         const isDeathsHollow = setting.name === 'Death’s Hollow';
         const encounterLimit = isDeathsHollow ? 3 : 2;
         if (encounterCount >= encounterLimit) {
@@ -821,7 +864,7 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
           encounterCount++;
           enemy = getRandomEnemy(setting.tiers);
           enemyHp = enemy.hp;
-          hasScavenged = false; // Reset scavenging for the new encounter
+          hasScavenged = false;
           await raidInteraction.editReply({
             content: `${player.name} - ${setting.name}\n${enemy.flavor}\nFight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`,
             embeds: [{ image: { url: setting.image } }],
@@ -906,15 +949,8 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
     } catch (error) {
       console.error(`Scavenge error for ${player.name}:`, error.stack);
       await raidInteraction.deferUpdate().catch(() => {});
-      await menuMessage.edit({
-        content: `${player.name} - ${setting.name}\nError during scavenge! Returning to main menu.`,
-        embeds: [{ image: { url: setting.image } }],
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('back_to_bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success)
-          )
-        ]
-      }).catch(err => console.error('Failed to update on scavenge error:', err));
+      await menuMessage.delete().catch(() => {});
+      await menuMessage.channel.send(`${player.name}, an interaction failed! Please use !menu to start again.`);
       collector.stop('error');
     }
   });
