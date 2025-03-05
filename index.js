@@ -328,13 +328,14 @@ client.on('messageCreate', async (message) => {
 
             raidCollector.on('end', (collected, reason) => {
               console.log(`Raid ended for ${player.name}. Reason: ${reason}`);
-              if (reason === 'time' || reason === 'run' || reason === 'death' || reason === 'back') {
-                menuMessage.edit({
-                  content: reason === 'time' ? `${player.name} stalls! Raid ends.\nHP: ${player.hp}, Energy: ${player.energy}/5, Loot: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}` : `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
-                  components: [mainMenu]
-                });
-                saveState();
-              }
+              const endContent = reason === 'time' 
+                ? `${player.name} stalls! Raid ends.\nHP: ${player.hp}, Energy: ${player.energy}/5, Loot: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}`
+                : `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`;
+              menuMessage.edit({
+                content: endContent,
+                components: [mainMenu]
+              });
+              saveState();
             });
           }
         } else if (interaction.customId === 'bunker') {
@@ -608,6 +609,7 @@ client.on('messageCreate', async (message) => {
           content: `${player.name}, session ended. Type !wsc to return.`,
           components: []
         });
+        saveState();
       }
     });
   }
@@ -658,7 +660,19 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
-client.login(TOKEN);
+// Prevent multiple bot instances
+let isBotRunning = false;
+
+if (!isBotRunning) {
+  client.login(TOKEN).then(() => {
+    isBotRunning = true;
+    console.log('Bot logged in successfully');
+  }).catch(err => {
+    console.error('Login failed:', err);
+  });
+} else {
+  console.log('Bot already running, skipping login');
+}
 
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
