@@ -19,9 +19,7 @@ const ADMIN_ADDRESS = '0xdbfb5034a49be4deba3f01f1e8455148d4657f0bc4344ac5ad39c0c
 const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(ADMIN_PRIVATE_KEY, 'base64'));
 
-let gameState = fs.existsSync('state.json') ? JSON.parse(fs.readFileSync('state.json')) : {
-  players: {}
-};
+let gameState = fs.existsSync('/data/state.json') ? JSON.parse(fs.readFileSync('/data/state.json')) : { players: {} };
 
 client.on('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
@@ -29,12 +27,12 @@ client.on('ready', async () => {
   console.log(`Admin SUI Balance: ${suiBalance.totalBalance} MIST`);
   setInterval(() => {
     for (const player of Object.values(gameState.players)) {
-      player.hp = Math.min(100, player.hp + 10); // Regen 10 HP/hour
-      player.energy = Math.min(5, player.energy + 1); // Regen 1 Energy/hour (test)
+      player.hp = Math.min(100, player.hp + 10);
+      player.energy = Math.min(5, player.energy + 1);
     }
     saveState();
     console.log('Regen ticked at', new Date().toISOString());
-  }, 60 * 60 * 1000); // Hourly for testing
+  }, 60 * 60 * 1000);
 });
 
 client.on('messageCreate', async (message) => {
@@ -49,7 +47,7 @@ client.on('messageCreate', async (message) => {
       message.reply('Usage: !register <Sui Address> <Name>');
       return;
     }
-    const wscCost = Math.round(2 / WSC_PRICE) * 1000000; // 20 WSC
+    const wscCost = Math.round(2 / WSC_PRICE) * 1000000;
     try {
       const wscCoins = await suiClient.getCoins({ owner: ADMIN_ADDRESS, coinType: WSC_COIN_TYPE });
       if (!wscCoins.data.length) throw new Error('No WSC in admin wallet');
@@ -137,7 +135,7 @@ client.on('messageCreate', async (message) => {
     let enemyAttack = 0;
     let loot = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
     let stage = 1;
-    let depth = 0; // Tracks how many "Continue On" rounds
+    let depth = 0;
 
     const getFightButtons = (enemyAlive) => new ActionRowBuilder()
       .addComponents(
@@ -156,21 +154,21 @@ client.on('messageCreate', async (message) => {
     const setEnemy = (isDeep = false) => {
       const tierRoll = Math.random();
       const enemyOptions = isDeathsHollow && stage === 3 && !isDeep
-        ? (Math.random() < 0.01 ? [enemies[6]] : enemies.slice(4, 6)) // Scorpion King or Tier 2
+        ? (Math.random() < 0.01 ? [enemies[6]] : enemies.slice(4, 6))
         : tierRoll < setting.tier1Chance ? enemies.slice(0, 4) : enemies.slice(4, 6);
       enemy = enemyOptions[Math.floor(Math.random() * enemyOptions.length)];
-      enemyHp = Math.floor(Math.random() * (enemy.hpMax - enemy.hpMin + 1)) + enemy.hpMin * (1 + depth * 0.1); // +10% HP per depth
-      enemyAttack = Math.floor(Math.random() * (enemy.attackMax - enemy.attackMin + 1)) + enemy.attackMin * (1 + depth * 0.1); // +10% Attack
+      enemyHp = Math.floor(Math.random() * (enemy.hpMax - enemy.hpMin + 1)) + enemy.hpMin * (1 + depth * 0.1);
+      enemyAttack = Math.floor(Math.random() * (enemy.attackMax - enemy.attackMin + 1)) + enemy.attackMin * (1 + depth * 0.1);
     };
 
-    setEnemy(); // Initial enemy for Round 1
+    setEnemy();
     let raidMessage = await message.reply({
       content: `${player.name} enters ${setting.name}\n${setting.desc}\nFight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`,
       components: [getFightButtons(true)]
     });
 
     const filter = i => i.user.id === message.author.id && ['attack', 'continue', 'run', 'heal', 'back', 'deeper'].includes(i.customId);
-    const collector = raidMessage.createMessageComponentCollector({ filter, time: 60000 });
+    const collector = raidMessage.createMessageComponentCollector({ filter, time: 120000 });
 
     collector.on('collect', async (interaction) => {
       await interaction.deferUpdate();
@@ -186,11 +184,11 @@ client.on('messageCreate', async (message) => {
           player.hp -= damage;
           update += `${enemy.name} hits for ${damage} (reduced by ${player.armor * 10}%). HP: ${player.hp}\n`;
         } else {
-          const scrLoot = (Math.random() * (enemy.scrMax - enemy.scrMin) + enemy.scrMin) * (1 + depth * 0.2); // +20% SCR per depth
+          const scrLoot = (Math.random() * (enemy.scrMax - enemy.scrMin) + enemy.scrMin) * (1 + depth * 0.2);
           loot.scr += scrLoot;
           update += `${enemy.name} falls! +${scrLoot.toFixed(2)} SCR\n`;
         }
-      } else if (interaction.customId === 'continue' && enemyHp <= 0 && stage < (isDeathsHollow ? 4 : 3)) {
+      } else if (interaction.customId === 'continue' && enemyHp <= 0) {
         stage += 1;
         if (stage === 2) {
           const scavengeScr = (Math.random() < 0.7 ? 0.1 : 0.05) * (1 + depth * 0.2);
@@ -224,6 +222,9 @@ client.on('messageCreate', async (message) => {
             else if (Math.random() < 0.002) loot.glowDust += 1;
           }
           update += `${encounter.name}: ${encounter.hpLoss > 0 ? `-${reducedLoss} HP (reduced by ${player.armor * 10}%)` : ''}, +${(encounter.scr * (1 + depth * 0.2)).toFixed(2)} SCR${loot.scrapMetal > 0 ? ', +1 Scrap Metal' : loot.rustShard > 0 ? ', +1 Rust Shard' : loot.glowDust > 0 ? ', +1 Glow Dust' : ''}\n`;
+          if (player.hp > 0) {
+            update += `Survived ${setting.name}! Loot so far: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}\n`;
+          }
         }
       } else if (interaction.customId === 'back') {
         player.bunker.scr += loot.scr;
@@ -286,8 +287,8 @@ client.on('messageCreate', async (message) => {
 
       let content = `${player.name} - ${setting.name}${depth > 0 ? ` (Depth ${depth})` : ''}\n${update}HP: ${player.hp}, Energy: ${player.energy}/5${enemyHp > 0 ? `\nEnemy HP: ${enemyHp}` : ''}\nPick an action:`;
       let components = player.hp > 0 ? 
-        (enemyHp > 0 || (stage < (isDeathsHollow ? 4 : 3)) ? [getFightButtons(enemyHp > 0)] : [getChoiceButtons()]) : 
-        [];
+        (enemyHp > 0 ? [getFightButtons(true)] : 
+        (stage < (isDeathsHollow ? 4 : 3) ? [getFightButtons(false)] : [getChoiceButtons()])) : [];
 
       await raidMessage.edit({ content, components });
       saveState();
@@ -381,10 +382,21 @@ client.on('messageCreate', async (message) => {
     stateText += `Equipped: ${player.equipped.weapon ? 'Rust Blade' : 'None'}, ${player.equipped.armor ? 'Glow Vest' : 'None'}\nScav Juice: ${player.inventory.scavJuice}`;
     message.channel.send(stateText);
   }
+
+  if (command === 'terms') {
+    message.reply(
+      'Wasteland Scourge Terms of Service:\n' +
+      '1. This is a game for entertainment only—no real-world value or profit is guaranteed.\n' +
+      '2. NFTs minted are owned by players; we’re not liable for their use or value.\n' +
+      '3. We store your Discord ID and Sui address for gameplay—data won’t be sold.\n' +
+      '4. Play at your own risk; we can update or stop the game anytime.\n' +
+      'Questions? DM the dev!'
+    );
+  }
 });
 
 function saveState() {
-  fs.writeFileSync('state.json', JSON.stringify(gameState, null, 2));
+  fs.writeFileSync('/data/state.json', JSON.stringify(gameState, null, 2));
   console.log('Game state saved');
 }
 
