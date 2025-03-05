@@ -180,7 +180,6 @@ client.on('messageCreate', async (message) => {
                 new ButtonBuilder().setCustomId('heal').setLabel('Heal').setStyle(ButtonStyle.Success)
               )];
 
-            await interaction.update({ content, components });
             console.log(`Raid started for ${player.name} in ${setting.name}`);
 
             const raidCollector = menuMessage.createMessageComponentCollector({ filter, time: 120000 });
@@ -300,8 +299,8 @@ client.on('messageCreate', async (message) => {
                   raidCollector.stop('death');
                 }
 
-                let raidContent = `${player.name} - ${setting.name}${depth > 0 ? ` (Depth ${depth})` : ''}\n${raidUpdate}HP: ${player.hp}, Energy: ${player.energy}/5${enemyHp > 0 ? `\nEnemy HP: ${enemyHp}` : ''}\nPick an action:`;
-                let raidComponents = player.hp > 0 ? 
+                content = `${player.name} - ${setting.name}${depth > 0 ? ` (Depth ${depth})` : ''}\n${raidUpdate}HP: ${player.hp}, Energy: ${player.energy}/5${enemyHp > 0 ? `\nEnemy HP: ${enemyHp}` : ''}\nPick an action:`;
+                components = player.hp > 0 ? 
                   (enemyHp > 0 ? [new ActionRowBuilder()
                     .addComponents(
                       new ButtonBuilder().setCustomId('attack').setLabel('Attack').setStyle(ButtonStyle.Primary),
@@ -319,7 +318,7 @@ client.on('messageCreate', async (message) => {
                       new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary)
                     )])) : [mainMenu];
 
-                await menuMessage.edit({ content: raidContent, components: raidComponents });
+                await menuMessage.edit({ content, components });
                 saveState();
               } catch (error) {
                 console.error(`Raid interaction error for ${player.name}:`, error);
@@ -337,270 +336,270 @@ client.on('messageCreate', async (message) => {
                 saveState();
               }
             });
-            return;
-          } else if (interaction.customId === 'bunker') {
-            content = `${player.name} - Bunker Access: Secure your loot.\nPick an action:`;
-            components = [new ActionRowBuilder()
-              .addComponents(
-                new ButtonBuilder().setCustomId('craft').setLabel('CRAFT').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('withdraw').setLabel('WITHDRAW NFTs').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId('store_assets').setLabel('STORE ASSETS').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
-              )];
-
-            await interaction.update({ content, components });
-            console.log(`Bunker opened for ${player.name}`);
-
-            const bunkerCollector = menuMessage.createMessageComponentCollector({ filter, time: 120000 });
-            bunkerCollector.on('collect', async (bunkerInteraction) => {
-              console.log(`Bunker button clicked by ${player.name}: ${bunkerInteraction.customId}`);
-              let bunkerUpdate = '';
-
-              try {
-                if (bunkerInteraction.customId === 'craft') {
-                  bunkerUpdate = `${player.name} - Craft Gear:\nPick an item:`;
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('craft_weapon').setLabel('Rust Blade (2 SM, 1 RS)').setStyle(ButtonStyle.Primary).setDisabled(player.bunker.scrapMetal < 2 || player.bunker.rustShard < 1),
-                      new ButtonBuilder().setCustomId('craft_armor').setLabel('Glow Vest (1 SM, 1 GD)').setStyle(ButtonStyle.Primary).setDisabled(player.bunker.scrapMetal < 1 || player.bunker.glowDust < 1),
-                      new ButtonBuilder().setCustomId('back_bunker').setLabel('Back').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (bunkerInteraction.customId === 'craft_weapon') {
-                  player.bunker.scrapMetal -= 2;
-                  player.bunker.rustShard -= 1;
-                  bunkerUpdate = `${player.name} crafted a Rust Blade!\nConfirm:`;
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('confirm_craft_weapon').setLabel('Confirm').setStyle(ButtonStyle.Primary),
-                      new ButtonBuilder().setCustomId('back_bunker').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (bunkerInteraction.customId === 'craft_armor') {
-                  player.bunker.scrapMetal -= 1;
-                  player.bunker.glowDust -= 1;
-                  bunkerUpdate = `${player.name} crafted a Glow Vest!\nConfirm:`;
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('confirm_craft_armor').setLabel('Confirm').setStyle(ButtonStyle.Primary),
-                      new ButtonBuilder().setCustomId('back_bunker').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (bunkerInteraction.customId === 'confirm_craft_weapon') {
-                  if (nftCount < 50) {
-                    const tx = new Transaction();
-                    const nft = tx.moveCall({
-                      target: '0x2::devnet_nft::mint',
-                      arguments: [
-                        tx.pure('RustBlade'),
-                        tx.pure(`WSC RustBlade for ${player.name}`),
-                        tx.pure('https://ipfs.io/ipfs/QmYourIPFSHashHere')
-                      ],
-                    });
-                    tx.transferObjects([nft], player.suiAddress);
-                    tx.setGasBudget(20000000);
-                    const result = await suiClient.signAndExecuteTransaction({
-                      transaction: tx,
-                      signer: keypair,
-                      options: { showEffects: true }
-                    });
-                    nftCount += 1;
-                    bunkerUpdate = `Crafted and minted Rust Blade NFT (FREE for first 50 players)!\nTx: ${result.digest}\nEquip with BUNKER > CRAFT`;
-                  } else {
-                    bunkerUpdate = `Crafted Rust Blade! (NFT minting coming soon)\nEquip with BUNKER > CRAFT`;
-                  }
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (bunkerInteraction.customId === 'confirm_craft_armor') {
-                  if (nftCount < 50) {
-                    const tx = new Transaction();
-                    const nft = tx.moveCall({
-                      target: '0x2::devnet_nft::mint',
-                      arguments: [
-                        tx.pure('GlowVest'),
-                        tx.pure(`WSC GlowVest for ${player.name}`),
-                        tx.pure('https://ipfs.io/ipfs/QmYourIPFSHashHere')
-                      ],
-                    });
-                    tx.transferObjects([nft], player.suiAddress);
-                    tx.setGasBudget(20000000);
-                    const result = await suiClient.signAndExecuteTransaction({
-                      transaction: tx,
-                      signer: keypair,
-                      options: { showEffects: true }
-                    });
-                    nftCount += 1;
-                    bunkerUpdate = `Crafted and minted Glow Vest NFT (FREE for first 50 players)!\nTx: ${result.digest}\nEquip with BUNKER > CRAFT`;
-                  } else {
-                    bunkerUpdate = `Crafted Glow Vest! (NFT minting coming soon)\nEquip with BUNKER > CRAFT`;
-                  }
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (bunkerInteraction.customId === 'withdraw') {
-                  bunkerUpdate = `${player.name} - Withdraw NFTs:\nComing soon on mainnet!`;
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (bunkerInteraction.customId === 'store_assets') {
-                  player.bunker.scr += player.active.scr;
-                  player.bunker.scrapMetal += player.active.scrapMetal;
-                  player.bunker.rustShard += player.active.rustShard;
-                  player.bunker.glowDust += player.active.glowDust;
-                  bunkerUpdate = `${player.name} stored: ${player.active.scr} SCR${player.active.scrapMetal > 0 ? `, ${player.active.scrapMetal} Scrap Metal` : ''}${player.active.rustShard > 0 ? `, ${player.active.rustShard} Rust Shard${player.active.rustShard > 1 ? 's' : ''}` : ''}${player.active.glowDust > 0 ? `, ${player.active.glowDust} Glow Dust` : ''}\nConfirm:`;
-                  player.active = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('confirm_store').setLabel('Confirm').setStyle(ButtonStyle.Primary),
-                      new ButtonBuilder().setCustomId('back_bunker').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (bunkerInteraction.customId === 'confirm_store') {
-                  bunkerUpdate = `${player.name} - Assets stored in bunker!\nHP: ${player.hp}, Energy: ${player.energy}/5`;
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (bunkerInteraction.customId === 'back_bunker') {
-                  bunkerUpdate = `${player.name} - Bunker Access: Secure your loot.\nPick an action:`;
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('craft').setLabel('CRAFT').setStyle(ButtonStyle.Primary),
-                      new ButtonBuilder().setCustomId('withdraw').setLabel('WITHDRAW NFTs').setStyle(ButtonStyle.Success),
-                      new ButtonBuilder().setCustomId('store_assets').setLabel('STORE ASSETS').setStyle(ButtonStyle.Secondary),
-                      new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (bunkerInteraction.customId === 'back') {
-                  bunkerCollector.stop('back');
-                }
-
-                await menuMessage.edit({ content: bunkerUpdate, components });
-                saveState();
-              } catch (error) {
-                console.error(`Bunker interaction error for ${player.name}:`, error);
-                await bunkerInteraction.reply({ content: 'Bunker error! Check logs.', ephemeral: true });
-              }
-            });
-
-            bunkerCollector.on('end', (collected, reason) => {
-              console.log(`Bunker ended for ${player.name}. Reason: ${reason}`);
-              if (reason === 'time' || reason === 'back') {
-                menuMessage.edit({
-                  content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
-                  components: [mainMenu]
-                });
-                saveState();
-              }
-            });
-            return;
-          } else if (interaction.customId === 'store') {
-            content = `${player.name} - Wasteland Trader: What’s your poison?\nActive SCR: ${player.active.scr}`;
-            components = [new ActionRowBuilder()
-              .addComponents(
-                new ButtonBuilder().setCustomId('buy_juice').setLabel('Buy Scav Juice (5 SCR)').setStyle(ButtonStyle.Primary).setDisabled(player.active.scr < 5),
-                new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
-              )];
-
-            await interaction.update({ content, components });
-            console.log(`Store opened for ${player.name}`);
-
-            const storeCollector = menuMessage.createMessageComponentCollector({ filter, time: 120000 });
-            storeCollector.on('collect', async (storeInteraction) => {
-              console.log(`Store button clicked by ${player.name}: ${storeInteraction.customId}`);
-              let storeUpdate = '';
-
-              try {
-                if (storeInteraction.customId === 'buy_juice') {
-                  player.active.scr -= 5;
-                  player.inventory.scavJuice += 1;
-                  storeUpdate = `${player.name} bought 1 Scav Juice for 5 SCR!\nScav Juice: ${player.inventory.scavJuice}`;
-                  components = [new ActionRowBuilder()
-                    .addComponents(
-                      new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
-                    )];
-                } else if (storeInteraction.customId === 'back') {
-                  storeCollector.stop('back');
-                }
-
-                await menuMessage.edit({ content: storeUpdate || `${player.name} - Wasteland Trader: What’s your poison?\nActive SCR: ${player.active.scr}`, components });
-                saveState();
-              } catch (error) {
-                console.error(`Store interaction error for ${player.name}:`, error);
-                await storeInteraction.reply({ content: 'Store error! Check logs.', ephemeral: true });
-              }
-            });
-
-            storeCollector.on('end', (collected, reason) => {
-              console.log(`Store ended for ${player.name}. Reason: ${reason}`);
-              if (reason === 'time' || reason === 'back') {
-                menuMessage.edit({
-                  content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
-                  components: [mainMenu]
-                });
-                saveState();
-              }
-            });
-            return;
-          } else if (interaction.customId === 'wallet') {
-            const wait = player.lastRaid && (Date.now() - player.lastRaid < 60 * 60 * 1000) ? Math.ceil((60 * 60 * 1000 - (Date.now() - player.lastRaid)) / 60000) : 0;
-            content = `${player.name}’s Wasteland Ledger:\nHP: ${player.hp}, Attack: ${player.attack}, Armor: ${player.armor * 10}%, Energy: ${player.energy}/5${wait > 0 ? `, Cooldown: ${wait} min` : ''}\n` +
-                      `Active: ${player.active.scr} SCR${player.active.scrapMetal > 0 ? `, ${player.active.scrapMetal} Scrap Metal` : ''}${player.active.rustShard > 0 ? `, ${player.active.rustShard} Rust Shard${player.active.rustShard > 1 ? 's' : ''}` : ''}${player.active.glowDust > 0 ? `, ${player.active.glowDust} Glow Dust` : ''}\n` +
-                      `Bunker: ${player.bunker.scr} SCR${player.bunker.scrapMetal > 0 ? `, ${player.bunker.scrapMetal} Scrap Metal` : ''}${player.bunker.rustShard > 0 ? `, ${player.bunker.rustShard} Rust Shard${player.bunker.rustShard > 1 ? 's' : ''}` : ''}${player.bunker.glowDust > 0 ? `, ${player.bunker.glowDust} Glow Dust` : ''}\n` +
-                      `Equipped: ${player.equipped.weapon ? 'Rust Blade' : 'None'}, ${player.equipped.armor ? 'Glow Vest' : 'None'}\nScav Juice: ${player.inventory.scavJuice}\nSui Address: ${player.suiAddress}`;
-            components = [new ActionRowBuilder()
-              .addComponents(
-                new ButtonBuilder().setCustomId('refresh').setLabel('REFRESH').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
-              )];
-
-            await interaction.update({ content, components });
-            console.log(`Wallet viewed by ${player.name}`);
-
-            const walletCollector = menuMessage.createMessageComponentCollector({ filter, time: 120000 });
-            walletCollector.on('collect', async (walletInteraction) => {
-              console.log(`Wallet button clicked by ${player.name}: ${walletInteraction.customId}`);
-              try {
-                if (walletInteraction.customId === 'refresh') {
-                  const wait = player.lastRaid && (Date.now() - player.lastRaid < 60 * 60 * 1000) ? Math.ceil((60 * 60 * 1000 - (Date.now() - player.lastRaid)) / 60000) : 0;
-                  content = `${player.name}’s Wasteland Ledger:\nHP: ${player.hp}, Attack: ${player.attack}, Armor: ${player.armor * 10}%, Energy: ${player.energy}/5${wait > 0 ? `, Cooldown: ${wait} min` : ''}\n` +
-                            `Active: ${player.active.scr} SCR${player.active.scrapMetal > 0 ? `, ${player.active.scrapMetal} Scrap Metal` : ''}${player.active.rustShard > 0 ? `, ${player.active.rustShard} Rust Shard${player.active.rustShard > 1 ? 's' : ''}` : ''}${player.active.glowDust > 0 ? `, ${player.active.glowDust} Glow Dust` : ''}\n` +
-                            `Bunker: ${player.bunker.scr} SCR${player.bunker.scrapMetal > 0 ? `, ${player.bunker.scrapMetal} Scrap Metal` : ''}${player.bunker.rustShard > 0 ? `, ${player.bunker.rustShard} Rust Shard${player.bunker.rustShard > 1 ? 's' : ''}` : ''}${player.bunker.glowDust > 0 ? `, ${player.bunker.glowDust} Glow Dust` : ''}\n` +
-                            `Equipped: ${player.equipped.weapon ? 'Rust Blade' : 'None'}, ${player.equipped.armor ? 'Glow Vest' : 'None'}\nScav Juice: ${player.inventory.scavJuice}\nSui Address: ${player.suiAddress}`;
-                } else if (walletInteraction.customId === 'back') {
-                  walletCollector.stop('back');
-                }
-                await menuMessage.edit({ content: content || `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`, components: walletInteraction.customId === 'back' ? [mainMenu] : components });
-                saveState();
-              } catch (error) {
-                console.error(`Wallet interaction error for ${player.name}:`, error);
-                await walletInteraction.reply({ content: 'Wallet error! Check logs.', ephemeral: true });
-              }
-            });
-
-            walletCollector.on('end', (collected, reason) => {
-              console.log(`Wallet ended for ${player.name}. Reason: ${reason}`);
-              if (reason === 'time' || reason === 'back') {
-                menuMessage.edit({
-                  content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
-                  components: [mainMenu]
-                });
-                saveState();
-              }
-            });
-            return;
-          } else if (interaction.customId === 'exit') {
-            content = `${player.name}, session ended. Type !wsc to return.`;
-            components = [];
-            collector.stop('exit');
           }
+        } else if (interaction.customId === 'bunker') {
+          content = `${player.name} - Bunker Access: Secure your loot.\nPick an action:`;
+          components = [new ActionRowBuilder()
+            .addComponents(
+              new ButtonBuilder().setCustomId('craft').setLabel('CRAFT').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('withdraw').setLabel('WITHDRAW NFTs').setStyle(ButtonStyle.Success),
+              new ButtonBuilder().setCustomId('store_assets').setLabel('STORE ASSETS').setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
+            )];
 
-          await interaction.update({ content: content || `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`, components });
-          saveState();
-        } catch (error) {
-          console.error(`Main menu interaction error for ${player.name}:`, error);
-          await interaction.reply({ content: 'Something went wrong! Check logs.', ephemeral: true });
+          console.log(`Bunker opened for ${player.name}`);
+
+          const bunkerCollector = menuMessage.createMessageComponentCollector({ filter, time: 120000 });
+          bunkerCollector.on('collect', async (bunkerInteraction) => {
+            console.log(`Bunker button clicked by ${player.name}: ${bunkerInteraction.customId}`);
+            let bunkerUpdate = '';
+
+            try {
+              if (bunkerInteraction.customId === 'craft') {
+                bunkerUpdate = `${player.name} - Craft Gear:\nPick an item:`;
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('craft_weapon').setLabel('Rust Blade (2 SM, 1 RS)').setStyle(ButtonStyle.Primary).setDisabled(player.bunker.scrapMetal < 2 || player.bunker.rustShard < 1),
+                    new ButtonBuilder().setCustomId('craft_armor').setLabel('Glow Vest (1 SM, 1 GD)').setStyle(ButtonStyle.Primary).setDisabled(player.bunker.scrapMetal < 1 || player.bunker.glowDust < 1),
+                    new ButtonBuilder().setCustomId('back_bunker').setLabel('Back').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (bunkerInteraction.customId === 'craft_weapon') {
+                player.bunker.scrapMetal -= 2;
+                player.bunker.rustShard -= 1;
+                bunkerUpdate = `${player.name} crafted a Rust Blade!\nConfirm:`;
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('confirm_craft_weapon').setLabel('Confirm').setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('back_bunker').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (bunkerInteraction.customId === 'craft_armor') {
+                player.bunker.scrapMetal -= 1;
+                player.bunker.glowDust -= 1;
+                bunkerUpdate = `${player.name} crafted a Glow Vest!\nConfirm:`;
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('confirm_craft_armor').setLabel('Confirm').setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('back_bunker').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (bunkerInteraction.customId === 'confirm_craft_weapon') {
+                if (nftCount < 50) {
+                  const tx = new Transaction();
+                  const nft = tx.moveCall({
+                    target: '0x2::devnet_nft::mint',
+                    arguments: [
+                      tx.pure('RustBlade'),
+                      tx.pure(`WSC RustBlade for ${player.name}`),
+                      tx.pure('https://ipfs.io/ipfs/QmYourIPFSHashHere')
+                    ],
+                  });
+                  tx.transferObjects([nft], player.suiAddress);
+                  tx.setGasBudget(20000000);
+                  const result = await suiClient.signAndExecuteTransaction({
+                    transaction: tx,
+                    signer: keypair,
+                    options: { showEffects: true }
+                  });
+                  nftCount += 1;
+                  bunkerUpdate = `Crafted and minted Rust Blade NFT (FREE for first 50 players)!\nTx: ${result.digest}\nEquip with BUNKER > CRAFT`;
+                } else {
+                  bunkerUpdate = `Crafted Rust Blade! (NFT minting coming soon)\nEquip with BUNKER > CRAFT`;
+                }
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (bunkerInteraction.customId === 'confirm_craft_armor') {
+                if (nftCount < 50) {
+                  const tx = new Transaction();
+                  const nft = tx.moveCall({
+                    target: '0x2::devnet_nft::mint',
+                    arguments: [
+                      tx.pure('GlowVest'),
+                      tx.pure(`WSC GlowVest for ${player.name}`),
+                      tx.pure('https://ipfs.io/ipfs/QmYourIPFSHashHere')
+                    ],
+                  });
+                  tx.transferObjects([nft], player.suiAddress);
+                  tx.setGasBudget(20000000);
+                  const result = await suiClient.signAndExecuteTransaction({
+                    transaction: tx,
+                    signer: keypair,
+                    options: { showEffects: true }
+                  });
+                  nftCount += 1;
+                  bunkerUpdate = `Crafted and minted Glow Vest NFT (FREE for first 50 players)!\nTx: ${result.digest}\nEquip with BUNKER > CRAFT`;
+                } else {
+                  bunkerUpdate = `Crafted Glow Vest! (NFT minting coming soon)\nEquip with BUNKER > CRAFT`;
+                }
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (bunkerInteraction.customId === 'withdraw') {
+                bunkerUpdate = `${player.name} - Withdraw NFTs:\nComing soon on mainnet!`;
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (bunkerInteraction.customId === 'store_assets') {
+                player.bunker.scr += player.active.scr;
+                player.bunker.scrapMetal += player.active.scrapMetal;
+                player.bunker.rustShard += player.active.rustShard;
+                player.bunker.glowDust += player.active.glowDust;
+                bunkerUpdate = `${player.name} stored: ${player.active.scr} SCR${player.active.scrapMetal > 0 ? `, ${player.active.scrapMetal} Scrap Metal` : ''}${player.active.rustShard > 0 ? `, ${player.active.rustShard} Rust Shard${player.active.rustShard > 1 ? 's' : ''}` : ''}${player.active.glowDust > 0 ? `, ${player.active.glowDust} Glow Dust` : ''}\nConfirm:`;
+                player.active = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('confirm_store').setLabel('Confirm').setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('back_bunker').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (bunkerInteraction.customId === 'confirm_store') {
+                bunkerUpdate = `${player.name} - Assets stored in bunker!\nHP: ${player.hp}, Energy: ${player.energy}/5`;
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (bunkerInteraction.customId === 'back_bunker') {
+                bunkerUpdate = `${player.name} - Bunker Access: Secure your loot.\nPick an action:`;
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('craft').setLabel('CRAFT').setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('withdraw').setLabel('WITHDRAW NFTs').setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId('store_assets').setLabel('STORE ASSETS').setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (bunkerInteraction.customId === 'back') {
+                bunkerCollector.stop('back');
+                content = `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`;
+                components = [mainMenu];
+              }
+
+              await menuMessage.edit({ content: bunkerUpdate || content, components });
+              saveState();
+            } catch (error) {
+              console.error(`Bunker interaction error for ${player.name}:`, error);
+              await bunkerInteraction.reply({ content: 'Bunker error! Check logs.', ephemeral: true });
+            }
+          });
+
+          bunkerCollector.on('end', (collected, reason) => {
+            console.log(`Bunker ended for ${player.name}. Reason: ${reason}`);
+            if (reason === 'time' || reason === 'back') {
+              menuMessage.edit({
+                content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
+                components: [mainMenu]
+              });
+              saveState();
+            }
+          });
+        } else if (interaction.customId === 'store') {
+          content = `${player.name} - Wasteland Trader: What’s your poison?\nActive SCR: ${player.active.scr}`;
+          components = [new ActionRowBuilder()
+            .addComponents(
+              new ButtonBuilder().setCustomId('buy_juice').setLabel('Buy Scav Juice (5 SCR)').setStyle(ButtonStyle.Primary).setDisabled(player.active.scr < 5),
+              new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
+            )];
+
+          console.log(`Store opened for ${player.name}`);
+
+          const storeCollector = menuMessage.createMessageComponentCollector({ filter, time: 120000 });
+          storeCollector.on('collect', async (storeInteraction) => {
+            console.log(`Store button clicked by ${player.name}: ${storeInteraction.customId}`);
+            let storeUpdate = '';
+
+            try {
+              if (storeInteraction.customId === 'buy_juice') {
+                player.active.scr -= 5;
+                player.inventory.scavJuice += 1;
+                storeUpdate = `${player.name} bought 1 Scav Juice for 5 SCR!\nScav Juice: ${player.inventory.scavJuice}`;
+                components = [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
+                  )];
+              } else if (storeInteraction.customId === 'back') {
+                storeCollector.stop('back');
+                content = `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`;
+                components = [mainMenu];
+              }
+
+              await menuMessage.edit({ content: storeUpdate || content, components });
+              saveState();
+            } catch (error) {
+              console.error(`Store interaction error for ${player.name}:`, error);
+              await storeInteraction.reply({ content: 'Store error! Check logs.', ephemeral: true });
+            }
+          });
+
+          storeCollector.on('end', (collected, reason) => {
+            console.log(`Store ended for ${player.name}. Reason: ${reason}`);
+            if (reason === 'time' || reason === 'back') {
+              menuMessage.edit({
+                content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
+                components: [mainMenu]
+              });
+              saveState();
+            }
+          });
+        } else if (interaction.customId === 'wallet') {
+          const wait = player.lastRaid && (Date.now() - player.lastRaid < 60 * 60 * 1000) ? Math.ceil((60 * 60 * 1000 - (Date.now() - player.lastRaid)) / 60000) : 0;
+          content = `${player.name}’s Wasteland Ledger:\nHP: ${player.hp}, Attack: ${player.attack}, Armor: ${player.armor * 10}%, Energy: ${player.energy}/5${wait > 0 ? `, Cooldown: ${wait} min` : ''}\n` +
+                    `Active: ${player.active.scr} SCR${player.active.scrapMetal > 0 ? `, ${player.active.scrapMetal} Scrap Metal` : ''}${player.active.rustShard > 0 ? `, ${player.active.rustShard} Rust Shard${player.active.rustShard > 1 ? 's' : ''}` : ''}${player.active.glowDust > 0 ? `, ${player.active.glowDust} Glow Dust` : ''}\n` +
+                    `Bunker: ${player.bunker.scr} SCR${player.bunker.scrapMetal > 0 ? `, ${player.bunker.scrapMetal} Scrap Metal` : ''}${player.bunker.rustShard > 0 ? `, ${player.bunker.rustShard} Rust Shard${player.bunker.rustShard > 1 ? 's' : ''}` : ''}${player.bunker.glowDust > 0 ? `, ${player.bunker.glowDust} Glow Dust` : ''}\n` +
+                    `Equipped: ${player.equipped.weapon ? 'Rust Blade' : 'None'}, ${player.equipped.armor ? 'Glow Vest' : 'None'}\nScav Juice: ${player.inventory.scavJuice}\nSui Address: ${player.suiAddress}`;
+          components = [new ActionRowBuilder()
+            .addComponents(
+              new ButtonBuilder().setCustomId('refresh').setLabel('REFRESH').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
+            )];
+
+          console.log(`Wallet viewed by ${player.name}`);
+
+          const walletCollector = menuMessage.createMessageComponentCollector({ filter, time: 120000 });
+          walletCollector.on('collect', async (walletInteraction) => {
+            console.log(`Wallet button clicked by ${player.name}: ${walletInteraction.customId}`);
+            try {
+              if (walletInteraction.customId === 'refresh') {
+                const wait = player.lastRaid && (Date.now() - player.lastRaid < 60 * 60 * 1000) ? Math.ceil((60 * 60 * 1000 - (Date.now() - player.lastRaid)) / 60000) : 0;
+                content = `${player.name}’s Wasteland Ledger:\nHP: ${player.hp}, Attack: ${player.attack}, Armor: ${player.armor * 10}%, Energy: ${player.energy}/5${wait > 0 ? `, Cooldown: ${wait} min` : ''}\n` +
+                          `Active: ${player.active.scr} SCR${player.active.scrapMetal > 0 ? `, ${player.active.scrapMetal} Scrap Metal` : ''}${player.active.rustShard > 0 ? `, ${player.active.rustShard} Rust Shard${player.active.rustShard > 1 ? 's' : ''}` : ''}${player.active.glowDust > 0 ? `, ${player.active.glowDust} Glow Dust` : ''}\n` +
+                          `Bunker: ${player.bunker.scr} SCR${player.bunker.scrapMetal > 0 ? `, ${player.bunker.scrapMetal} Scrap Metal` : ''}${player.bunker.rustShard > 0 ? `, ${player.bunker.rustShard} Rust Shard${player.bunker.rustShard > 1 ? 's' : ''}` : ''}${player.bunker.glowDust > 0 ? `, ${player.bunker.glowDust} Glow Dust` : ''}\n` +
+                          `Equipped: ${player.equipped.weapon ? 'Rust Blade' : 'None'}, ${player.equipped.armor ? 'Glow Vest' : 'None'}\nScav Juice: ${player.inventory.scavJuice}\nSui Address: ${player.suiAddress}`;
+              } else if (walletInteraction.customId === 'back') {
+                walletCollector.stop('back');
+                content = `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`;
+                components = [mainMenu];
+              }
+              await menuMessage.edit({ content, components });
+              saveState();
+            } catch (error) {
+              console.error(`Wallet interaction error for ${player.name}:`, error);
+              await walletInteraction.reply({ content: 'Wallet error! Check logs.', ephemeral: true });
+            }
+          });
+
+          walletCollector.on('end', (collected, reason) => {
+            console.log(`Wallet ended for ${player.name}. Reason: ${reason}`);
+            if (reason === 'time' || reason === 'back') {
+              menuMessage.edit({
+                content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
+                components: [mainMenu]
+              });
+              saveState();
+            }
+          });
+        } else if (interaction.customId === 'exit') {
+          content = `${player.name}, session ended. Type !wsc to return.`;
+          components = [];
+          collector.stop('exit');
         }
-      });
+
+        await interaction.update({ content: content || `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`, components });
+        saveState();
+      } catch (error) {
+        console.error(`Main menu interaction error for ${player.name}:`, error);
+        await interaction.reply({ content: 'Something went wrong! Check logs.', ephemeral: true });
+      }
+    });
 
     collector.on('end', (collected, reason) => {
       console.log(`Main menu ended for ${player.name}. Reason: ${reason}`);
@@ -616,6 +615,7 @@ client.on('messageCreate', async (message) => {
   if (command === 'save') {
     console.log('Current gameState:', JSON.stringify(gameState, null, 2));
     message.reply('Game state logged to console—check Render logs or ask dev to copy it!');
+    saveState();
   }
 
   if (command === 'terms') {
@@ -631,13 +631,36 @@ client.on('messageCreate', async (message) => {
 });
 
 function saveState() {
-  fs.writeFileSync('gameState.json', JSON.stringify(gameState, null, 2));
-  console.log('State saved to gameState.json at', new Date().toISOString());
+  try {
+    fs.writeFileSync('gameState.json', JSON.stringify(gameState, null, 2));
+    console.log('State saved to gameState.json at', new Date().toISOString());
+  } catch (error) {
+    console.error('Failed to save gameState:', error);
+  }
 }
+
+// Save state on process exit or crash
+process.on('SIGINT', () => {
+  console.log('Received SIGINT. Saving state and exiting...');
+  saveState();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM. Saving state and exiting...');
+  saveState();
+  process.exit(0);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  saveState();
+  process.exit(1);
+});
 
 client.login(TOKEN);
 
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Bot alive');
-}).listen(8080, () => console.log('Ping server on port 8080'));
+}).listen(8080, () => console.log('Ping server on port 8080 for UptimeRobot'));
