@@ -3,7 +3,7 @@ const { SuiClient, getFullnodeUrl } = require('@mysten/sui/client');
 const { Transaction } = require('@mysten/sui/transactions');
 const { Ed25519Keypair } = require('@mysten/sui/keypairs/ed25519');
 const fs = require('fs');
-const http = require('http'); // Added for ping endpoint
+const http = require('http');
 require('dotenv').config();
 
 const client = new Client({ 
@@ -30,11 +30,11 @@ client.on('ready', async () => {
   setInterval(() => {
     for (const player of Object.values(gameState.players)) {
       player.hp = Math.min(100, player.hp + 10); // Regen 10 HP/hour
-      player.energy = Math.min(5, player.energy + 1); // Regen 1 Energy/hour (test; set to 3 hours later)
+      player.energy = Math.min(5, player.energy + 1); // Regen 1 Energy/hour (test)
     }
     saveState();
     console.log('Regen ticked at', new Date().toISOString());
-  }, 60 * 60 * 1000); // Hourly for testing, change to 3 * 60 * 60 * 1000 for 3 hours
+  }, 60 * 60 * 1000); // Hourly for testing
 });
 
 client.on('messageCreate', async (message) => {
@@ -129,32 +129,47 @@ client.on('messageCreate', async (message) => {
       { name: 'Dust Wretch', hpMin: 20, hpMax: 30, attackMin: 3, attackMax: 5, scrMin: 0.05, scrMax: 0.07 },
       { name: 'Sludge Leech', hpMin: 15, hpMax: 20, attackMin: 5, attackMax: 7, scrMin: 0.02, scrMax: 0.04 },
       { name: 'Iron Maw', hpMin: 40, hpMax: 50, attackMin: 8, attackMax: 10, scrMin: 0.15, scrMax: 0.2 },
-      { name: 'Rad Reaver', hpMin: 35, hpMax: 45, attackMin: 7, attackMax: 9, scrMin: 0.1, scrMax: 0.15 }
+      { name: 'Rad Reaver', hpMin: 35, hpMax: 45, attackMin: 7, attackMax: 9, scrMin: 0.1, scrMax: 0.15 },
+      { name: 'Radiated Scorpion King', hpMin: 50, hpMax: 60, attackMin: 10, attackMax: 12, scrMin: 1, scrMax: 1 }
     ];
-    const tierRoll = Math.random();
-    const enemyOptions = tierRoll < setting.tier1Chance ? enemies.slice(0, 4) : enemies.slice(4);
-    let enemy = enemyOptions[Math.floor(Math.random() * enemyOptions.length)];
-    let enemyHp = Math.floor(Math.random() * (enemy.hpMax - enemy.hpMin + 1)) + enemy.hpMin;
-    let enemyAttack = Math.floor(Math.random() * (enemy.attackMax - enemy.attackMin + 1)) + enemy.attackMin;
+    let enemy = null;
+    let enemyHp = 0;
+    let enemyAttack = 0;
     let loot = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
     let stage = 1;
+    let depth = 0; // Tracks how many "Continue On" rounds
 
-    const getButtons = (enemyAlive) => new ActionRowBuilder()
+    const getFightButtons = (enemyAlive) => new ActionRowBuilder()
       .addComponents(
-        new ButtonBuilder()
-          .setCustomId(enemyAlive ? 'attack' : 'continue')
-          .setLabel(enemyAlive ? 'Attack' : 'Continue')
-          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('attack').setLabel('Attack').setStyle(ButtonStyle.Primary).setDisabled(!enemyAlive),
+        new ButtonBuilder().setCustomId('continue').setLabel('Continue').setStyle(ButtonStyle.Primary).setDisabled(enemyAlive),
         new ButtonBuilder().setCustomId('run').setLabel('Run').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('heal').setLabel('Heal').setStyle(ButtonStyle.Success)
       );
 
+    const getChoiceButtons = () => new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder().setCustomId('back').setLabel('Back to Bunker').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('deeper').setLabel('Continue On').setStyle(ButtonStyle.Danger).setDisabled(player.energy < 1)
+      );
+
+    const setEnemy = (isDeep = false) => {
+      const tierRoll = Math.random();
+      const enemyOptions = isDeathsHollow && stage === 3 && !isDeep
+        ? (Math.random() < 0.01 ? [enemies[6]] : enemies.slice(4, 6)) // Scorpion King or Tier 2
+        : tierRoll < setting.tier1Chance ? enemies.slice(0, 4) : enemies.slice(4, 6);
+      enemy = enemyOptions[Math.floor(Math.random() * enemyOptions.length)];
+      enemyHp = Math.floor(Math.random() * (enemy.hpMax - enemy.hpMin + 1)) + enemy.hpMin * (1 + depth * 0.1); // +10% HP per depth
+      enemyAttack = Math.floor(Math.random() * (enemy.attackMax - enemy.attackMin + 1)) + enemy.attackMin * (1 + depth * 0.1); // +10% Attack
+    };
+
+    setEnemy(); // Initial enemy for Round 1
     let raidMessage = await message.reply({
       content: `${player.name} enters ${setting.name}\n${setting.desc}\nFight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`,
-      components: [getButtons(true)]
+      components: [getFightButtons(true)]
     });
 
-    const filter = i => i.user.id === message.author.id && ['attack', 'continue', 'run', 'heal'].includes(i.customId);
+    const filter = i => i.user.id === message.author.id && ['attack', 'continue', 'run', 'heal', 'back', 'deeper'].includes(i.customId);
     const collector = raidMessage.createMessageComponentCollector({ filter, time: 60000 });
 
     collector.on('collect', async (interaction) => {
@@ -171,30 +186,23 @@ client.on('messageCreate', async (message) => {
           player.hp -= damage;
           update += `${enemy.name} hits for ${damage} (reduced by ${player.armor * 10}%). HP: ${player.hp}\n`;
         } else {
-          const scrLoot = Math.random() * (enemy.scrMax - enemy.scrMin) + enemy.scrMin;
+          const scrLoot = (Math.random() * (enemy.scrMax - enemy.scrMin) + enemy.scrMin) * (1 + depth * 0.2); // +20% SCR per depth
           loot.scr += scrLoot;
           update += `${enemy.name} falls! +${scrLoot.toFixed(2)} SCR\n`;
         }
       } else if (interaction.customId === 'continue' && enemyHp <= 0 && stage < (isDeathsHollow ? 4 : 3)) {
         stage += 1;
         if (stage === 2) {
-          const scavengeScr = Math.random() < 0.7 ? 0.1 : 0.05;
+          const scavengeScr = (Math.random() < 0.7 ? 0.1 : 0.05) * (1 + depth * 0.2);
           loot.scr += scavengeScr;
           if (Math.random() < 0.005) loot.scrapMetal += 1;
           else if (Math.random() < 0.003) loot.rustShard += 1;
           else if (Math.random() < 0.002) loot.glowDust += 1;
-          update += `Scavenge: +${scavengeScr} SCR${loot.scrapMetal > 0 ? ', +1 Scrap Metal' : loot.rustShard > 0 ? ', +1 Rust Shard' : loot.glowDust > 0 ? ', +1 Glow Dust' : ''}\n`;
+          update += `Scavenge: +${scavengeScr.toFixed(2)} SCR${loot.scrapMetal > 0 ? ', +1 Scrap Metal' : loot.rustShard > 0 ? ', +1 Rust Shard' : loot.glowDust > 0 ? ', +1 Glow Dust' : ''}\n`;
         } else if (stage === 3 && isDeathsHollow) {
-          const scorpionRoll = Math.random();
-          if (scorpionRoll < 0.01) {
-            enemy = { name: 'Radiated Scorpion King', hpMin: 50, hpMax: 60, attackMin: 10, attackMax: 12, scrMin: 1, scrMax: 1 };
-          } else {
-            enemy = enemies[Math.floor(Math.random() * 2) + 4]; // Iron Maw or Rad Reaver
-          }
-          enemyHp = Math.floor(Math.random() * (enemy.hpMax - enemy.hpMin + 1)) + enemy.hpMin;
-          enemyAttack = Math.floor(Math.random() * (enemy.attackMax - enemy.attackMin + 1)) + enemy.attackMin;
+          setEnemy();
           update += `Fight: ${enemy.name} (HP: ${enemyHp}) lunges!\n`;
-        } else if ((stage === 3 && !isDeathsHollow) || (stage === 4 && isDeathsHollow)) {
+        } else if (stage === 3 || (stage === 4 && isDeathsHollow)) {
           const encounters = [
             { name: 'Radiation Leak', hpLoss: 5, scr: 0.05 },
             { name: 'Razor Snare', hpLoss: 5, scr: 0.05 },
@@ -205,7 +213,7 @@ client.on('messageCreate', async (message) => {
           const encounter = encounters[Math.floor(Math.random() * encounters.length)];
           const reducedLoss = Math.floor(encounter.hpLoss * (1 - player.armor * 0.1));
           player.hp -= reducedLoss;
-          loot.scr += encounter.scr;
+          loot.scr += encounter.scr * (1 + depth * 0.2);
           if (encounter.name === 'Loot Cache') {
             if (Math.random() < 0.02) loot.scrapMetal += 1;
             else if (Math.random() < 0.02) loot.rustShard += 1;
@@ -215,20 +223,42 @@ client.on('messageCreate', async (message) => {
             else if (Math.random() < 0.003) loot.rustShard += 1;
             else if (Math.random() < 0.002) loot.glowDust += 1;
           }
-          update += `${encounter.name}: ${encounter.hpLoss > 0 ? `-${reducedLoss} HP (reduced by ${player.armor * 10}%)` : ''}, +${encounter.scr} SCR${loot.scrapMetal > 0 ? ', +1 Scrap Metal' : loot.rustShard > 0 ? ', +1 Rust Shard' : loot.glowDust > 0 ? ', +1 Glow Dust' : ''}\n`;
-          if (player.hp > 0) {
-            player.active.scr += loot.scr;
-            player.active.scrapMetal += loot.scrapMetal;
-            player.active.rustShard += loot.rustShard;
-            player.active.glowDust += loot.glowDust;
-            update += `Survived ${setting.name}! Loot: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}\n`;
-            collector.stop('complete');
-          } else {
-            update += `${player.name} dies! All active loot lost.\n`;
-            player.active = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
-            player.lastRaid = Date.now();
-            collector.stop('death');
+          update += `${encounter.name}: ${encounter.hpLoss > 0 ? `-${reducedLoss} HP (reduced by ${player.armor * 10}%)` : ''}, +${(encounter.scr * (1 + depth * 0.2)).toFixed(2)} SCR${loot.scrapMetal > 0 ? ', +1 Scrap Metal' : loot.rustShard > 0 ? ', +1 Rust Shard' : loot.glowDust > 0 ? ', +1 Glow Dust' : ''}\n`;
+        }
+      } else if (interaction.customId === 'back') {
+        player.bunker.scr += loot.scr;
+        player.bunker.scrapMetal += loot.scrapMetal;
+        player.bunker.rustShard += loot.rustShard;
+        player.bunker.glowDust += loot.glowDust;
+        update += `${player.name} returns to bunker! Stored: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}\n`;
+        player.active = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
+        collector.stop('back');
+      } else if (interaction.customId === 'deeper' && player.energy >= 1) {
+        player.energy -= 1;
+        depth += 1;
+        stage += 1;
+        const deeperRoll = Math.random();
+        if (deeperRoll < 0.5) {
+          setEnemy(true);
+          update += `Deeper into ${setting.name} (Depth ${depth}): ${enemy.name} (HP: ${enemyHp}) lunges!\n`;
+        } else {
+          const encounters = [
+            { name: 'Radiation Surge', hpLoss: 10, scr: 0.1 },
+            { name: 'Toxic Winds', hpLoss: 8, scr: 0.08 },
+            { name: '_collapse Trap', hpLoss: 12, scr: 0.15 },
+            { name: 'Mutant Ambush', hpLoss: 15, scr: 0.2 },
+            { name: 'Hidden Cache', hpLoss: 0, scr: 0.75 }
+          ];
+          const encounter = encounters[Math.floor(Math.random() * encounters.length)];
+          const reducedLoss = Math.floor(encounter.hpLoss * (1 - player.armor * 0.1));
+          player.hp -= reducedLoss;
+          loot.scr += encounter.scr * (1 + depth * 0.2);
+          if (encounter.name === 'Hidden Cache') {
+            if (Math.random() < 0.03) loot.scrapMetal += 1;
+            else if (Math.random() < 0.03) loot.rustShard += 1;
+            else if (Math.random() < 0.03) loot.glowDust += 1;
           }
+          update += `Deeper into ${setting.name} (Depth ${depth}): ${encounter.name}: ${encounter.hpLoss > 0 ? `-${reducedLoss} HP` : ''}, +${(encounter.scr * (1 + depth * 0.2)).toFixed(2)} SCR${loot.scrapMetal > 0 ? ', +1 Scrap Metal' : loot.rustShard > 0 ? ', +1 Rust Shard' : loot.glowDust > 0 ? ', +1 Glow Dust' : ''}\n`;
         }
       } else if (interaction.customId === 'run') {
         player.active.scr += loot.scr;
@@ -254,16 +284,21 @@ client.on('messageCreate', async (message) => {
         collector.stop('death');
       }
 
-      await raidMessage.edit({
-        content: `${player.name} - ${setting.name}\n${update}HP: ${player.hp}, Energy: ${player.energy}/5${enemyHp > 0 ? `\nEnemy HP: ${enemyHp}` : ''}\nPick an action:`,
-        components: player.hp > 0 && (enemyHp > 0 || (enemyHp <= 0 && stage < (isDeathsHollow ? 4 : 3))) ? [getButtons(enemyHp > 0)] : []
-      });
+      let content = `${player.name} - ${setting.name}${depth > 0 ? ` (Depth ${depth})` : ''}\n${update}HP: ${player.hp}, Energy: ${player.energy}/5${enemyHp > 0 ? `\nEnemy HP: ${enemyHp}` : ''}\nPick an action:`;
+      let components = player.hp > 0 ? 
+        (enemyHp > 0 || (stage < (isDeathsHollow ? 4 : 3)) ? [getFightButtons(enemyHp > 0)] : [getChoiceButtons()]) : 
+        [];
+
+      await raidMessage.edit({ content, components });
       saveState();
     });
 
     collector.on('end', (collected, reason) => {
       if (reason === 'time') {
-        raidMessage.edit({ content: `${player.name} stalls! Raid ends.\nHP: ${player.hp}, Energy: ${player.energy}/5, Loot: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}`, components: [] });
+        raidMessage.edit({ 
+          content: `${player.name} stalls! Raid ends.\nHP: ${player.hp}, Energy: ${player.energy}/5, Loot: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}`, 
+          components: [] 
+        });
         saveState();
       }
     });
@@ -320,11 +355,11 @@ client.on('messageCreate', async (message) => {
     }
     const type = args[0]?.toLowerCase();
     if (type === 'weapon') {
-      player.attack = 15; // Base 10 + 5
+      player.attack = 15;
       player.equipped.weapon = true;
       message.reply(`Equipped Rust Blade! Attack: ${player.attack}`);
     } else if (type === 'armor') {
-      player.armor = Math.min(3, player.armor + 1); // Max 30%
+      player.armor = Math.min(3, player.armor + 1);
       player.equipped.armor = true;
       message.reply(`Equipped Glow Vest! Armor: ${player.armor * 10}%`);
     } else {
@@ -355,7 +390,6 @@ function saveState() {
 
 client.login(TOKEN);
 
-// Ping endpoint for UptimeRobot
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Bot alive');
