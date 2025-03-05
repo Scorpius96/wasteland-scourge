@@ -19,7 +19,6 @@ const ADMIN_ADDRESS = '0xdbfb5034a49be4deba3f01f1e8455148d4657f0bc4344ac5ad39c0c
 const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(ADMIN_PRIVATE_KEY, 'base64'));
 
-// Load gameState from file if it exists, otherwise start fresh
 let gameState = { players: {} };
 if (fs.existsSync('gameState.json')) {
   gameState = JSON.parse(fs.readFileSync('gameState.json'));
@@ -38,7 +37,7 @@ client.on('ready', async () => {
     }
     saveState();
     console.log('Regen ticked at', new Date().toISOString());
-  }, 60 * 60 * 1000); // 1 hour regen
+  }, 60 * 60 * 1000);
 });
 
 client.on('messageCreate', async (message) => {
@@ -143,7 +142,7 @@ client.on('messageCreate', async (message) => {
             const roll = Math.random();
             const setting = roll < 0.95 ? settings[Math.floor(Math.random() * 3)] : settings[3];
             await handleRaid(player, menuMessage, setting);
-            return; // Raid handler manages its own flow
+            return;
           }
         } else if (interaction.customId === 'bunker') {
           content = `${player.name} - Bunker Access: Secure your loot.\nPick an action:`;
@@ -204,9 +203,9 @@ client.on('messageCreate', async (message) => {
                     options: { showEffects: true }
                   });
                   nftCount += 1;
-                  bunkerUpdate = `Crafted and minted Rust Blade NFT (FREE for first 50 players)!\nTx: ${result.digest}\nEquip with BUNKER > CRAFT`;
+                  bunkerUpdate = `Crafted and minted Rust Blade NFT (FREE for first 50 players)!\nTx: ${result.digest}`;
                 } else {
-                  bunkerUpdate = `Crafted Rust Blade! (NFT minting coming soon)\nEquip with BUNKER > CRAFT`;
+                  bunkerUpdate = `Crafted Rust Blade! (NFT minting coming soon)`;
                 }
                 components = [new ActionRowBuilder()
                   .addComponents(
@@ -231,9 +230,9 @@ client.on('messageCreate', async (message) => {
                     options: { showEffects: true }
                   });
                   nftCount += 1;
-                  bunkerUpdate = `Crafted and minted Glow Vest NFT (FREE for first 50 players)!\nTx: ${result.digest}\nEquip with BUNKER > CRAFT`;
+                  bunkerUpdate = `Crafted and minted Glow Vest NFT (FREE for first 50 players)!\nTx: ${result.digest}`;
                 } else {
-                  bunkerUpdate = `Crafted Glow Vest! (NFT minting coming soon)\nEquip with BUNKER > CRAFT`;
+                  bunkerUpdate = `Crafted Glow Vest! (NFT minting coming soon)`;
                 }
                 components = [new ActionRowBuilder()
                   .addComponents(
@@ -280,7 +279,7 @@ client.on('messageCreate', async (message) => {
               await menuMessage.edit({ content: bunkerUpdate || content, components });
               saveState();
             } catch (error) {
-              console.error(`Bunker interaction error for ${player.name}:`, error);
+              console.error(`Bunker error for ${player.name}:`, error);
               await bunkerInteraction.reply({ content: 'Bunker error! Check logs.', ephemeral: true });
             }
           });
@@ -322,7 +321,7 @@ client.on('messageCreate', async (message) => {
               await menuMessage.edit({ content: storeUpdate || content, components });
               saveState();
             } catch (error) {
-              console.error(`Store interaction error for ${player.name}:`, error);
+              console.error(`Store error for ${player.name}:`, error);
               await storeInteraction.reply({ content: 'Store error! Check logs.', ephemeral: true });
             }
           });
@@ -365,7 +364,7 @@ client.on('messageCreate', async (message) => {
               await menuMessage.edit({ content, components });
               saveState();
             } catch (error) {
-              console.error(`Wallet interaction error for ${player.name}:`, error);
+              console.error(`Wallet error for ${player.name}:`, error);
               await walletInteraction.reply({ content: 'Wallet error! Check logs.', ephemeral: true });
             }
           });
@@ -388,7 +387,7 @@ client.on('messageCreate', async (message) => {
         await interaction.update({ content: content || `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`, components });
         saveState();
       } catch (error) {
-        console.error(`Main menu interaction error for ${player.name}:`, error);
+        console.error(`Main menu error for ${player.name}:`, error);
         await interaction.reply({ content: 'Something went wrong! Check logs.', ephemeral: true });
       }
     });
@@ -423,8 +422,8 @@ client.on('messageCreate', async (message) => {
 });
 
 async function handleRaid(player, menuMessage, setting, depth = 0) {
+  console.log(`Starting raid for ${player.name} in ${setting.name}`);
   let loot = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
-  let stage = 1;
   let enemy = null;
   let enemyHp = 0;
   let enemyAttack = 0;
@@ -438,61 +437,49 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
       new ButtonBuilder().setCustomId('exit').setLabel('EXIT').setStyle(ButtonStyle.Secondary)
     );
 
-  const setEnemy = (isDeep = false) => {
+  const setEnemy = () => {
     const enemies = [
-      { name: 'Rust Creeper', hpMin: 20, hpMax: 25, attackMin: 3, attackMax: 5, scrMin: 0.03, scrMax: 0.05 },
-      { name: 'Glow Hound', hpMin: 25, hpMax: 30, attackMin: 4, attackMax: 6, scrMin: 0.04, scrMax: 0.06 },
-      { name: 'Dust Wretch', hpMin: 20, hpMax: 30, attackMin: 3, attackMax: 5, scrMin: 0.05, scrMax: 0.07 },
-      { name: 'Sludge Leech', hpMin: 15, hpMax: 20, attackMin: 5, attackMax: 7, scrMin: 0.02, scrMax: 0.04 },
-      { name: 'Iron Maw', hpMin: 40, hpMax: 50, attackMin: 8, attackMax: 10, scrMin: 0.15, scrMax: 0.2 },
-      { name: 'Rad Reaver', hpMin: 35, hpMax: 45, attackMin: 7, attackMax: 9, scrMin: 0.1, scrMax: 0.15 },
-      { name: 'Radiated Scorpion King', hpMin: 50, hpMax: 60, attackMin: 10, attackMax: 12, scrMin: 1, scrMax: 1 }
+      { name: 'Rust Creeper', hpMin: 20, hpMax: 25, attackMin: 3, attackMax: 5, scrMin: 0.03, scrMax: 0.05 }
+      // Simplified to one enemy for debugging—add others back later
     ];
-    const tierRoll = Math.random();
-    const enemyOptions = setting.name === 'Death’s Hollow' && stage === 3 && !isDeep
-      ? (Math.random() < 0.01 ? [enemies[6]] : enemies.slice(4, 6))
-      : tierRoll < setting.tier1Chance ? enemies.slice(0, 4) : enemies.slice(4, 6);
-    enemy = enemyOptions[Math.floor(Math.random() * enemyOptions.length)];
-    enemyHp = Math.floor(Math.random() * (enemy.hpMax - enemy.hpMin + 1)) + enemy.hpMin * (1 + depth * 0.1);
-    enemyAttack = Math.floor(Math.random() * (enemy.attackMax - enemy.attackMin + 1)) + enemy.attackMin * (1 + depth * 0.1);
+    enemy = enemies[0];
+    enemyHp = Math.floor(Math.random() * (enemy.hpMax - enemy.hpMin + 1)) + enemy.hpMin;
+    enemyAttack = Math.floor(Math.random() * (enemy.attackMax - enemy.attackMin + 1)) + enemy.attackMin;
+    console.log(`Enemy set: ${enemy.name}, HP: ${enemyHp}, Attack: ${enemyAttack}`);
   };
 
-  const updateMenu = async () => {
-    const attack = player.equipped.weapon ? player.attack + 5 : player.attack;
-    let content = `${player.name} - ${setting.name}${depth > 0 ? ` (Depth ${depth})` : ''}\n`;
-    let components = [];
-
-    if (enemyHp > 0) {
-      content += `Fight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`;
-      components = [new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder().setCustomId('attack').setLabel('Attack').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('heal').setLabel('Heal').setStyle(ButtonStyle.Success)
-        )];
-    } else if (stage < (setting.name === 'Death’s Hollow' ? 4 : 3)) {
-      content += `Enemy down! Loot so far: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}\nHP: ${player.hp}, Energy: ${player.energy}/5\nNext move:`;
-      components = [new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder().setCustomId('continue').setLabel('Continue').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary)
-        )];
-    } else {
-      content += `Raid complete! Loot: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}\nHP: ${player.hp}, Energy: ${player.energy}/5\nFinish up:`;
-      components = [new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder().setCustomId('back').setLabel('Back to Bunker').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('deeper').setLabel('Continue On').setStyle(ButtonStyle.Danger).setDisabled(player.energy < 1),
-          new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary)
-        )];
+  const updateMenu = async (raidUpdate = '') => {
+    try {
+      const attack = player.equipped.weapon ? player.attack + 5 : player.attack;
+      let content = `${player.name} - ${setting.name}\n${raidUpdate}`;
+      let components = [];
+      if (enemyHp > 0) {
+        content += `Fight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`;
+        components = [new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder().setCustomId('attack').setLabel('Attack').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('heal').setLabel('Heal').setStyle(ButtonStyle.Success)
+          )];
+      } else {
+        content += `Enemy down! Loot: ${loot.scr.toFixed(2)} SCR\nHP: ${player.hp}, Energy: ${player.energy}/5\nNext move:`;
+        components = [new ActionRowBuilder()
+          .addComponents(
+            new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary)
+          )];
+      }
+      console.log(`Updating menu: ${content}`);
+      await menuMessage.edit({ content, components });
+    } catch (error) {
+      console.error(`Menu update error for ${player.name}:`, error);
+      await menuMessage.edit({ content: `${player.name}, raid error occurred. Check logs.`, components: [mainMenu] });
     }
-    await menuMessage.edit({ content, components });
   };
 
   setEnemy();
-  while (player.hp > 0 && (enemyHp > 0 || stage <= (setting.name === 'Death’s Hollow' ? 4 : 3))) {
+  while (player.hp > 0 && enemyHp > 0) {
     await updateMenu();
-    const collector = menuMessage.createMessageComponentCollector({ filter, time: 600000 }); // 10-minute timeout
+    const collector = menuMessage.createMessageComponentCollector({ filter, time: 600000 });
     await new Promise((resolve) => {
       collector.on('collect', async (interaction) => {
         let raidUpdate = '';
@@ -502,13 +489,11 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
             enemyHp -= attack;
             raidUpdate += `${player.name} hits ${enemy.name} for ${attack}. Enemy HP: ${enemyHp}\n`;
             if (enemyHp > 0) {
-              const rawDamage = enemyAttack;
-              const reduction = player.armor * 0.1;
-              const damage = Math.floor(rawDamage * (1 - reduction));
+              const damage = Math.floor(enemyAttack * (1 - player.armor * 0.1));
               player.hp -= damage;
               raidUpdate += `${enemy.name} hits for ${damage} (reduced by ${player.armor * 10}%). HP: ${player.hp}\n`;
             } else {
-              const scrLoot = (Math.random() * (enemy.scrMax - enemy.scrMin) + enemy.scrMin) * (1 + depth * 0.2);
+              const scrLoot = (Math.random() * (enemy.scrMax - enemy.scrMin) + enemy.scrMin);
               loot.scr += scrLoot;
               raidUpdate += `${enemy.name} falls! +${scrLoot.toFixed(2)} SCR\n`;
             }
@@ -516,96 +501,19 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
             if (player.inventory.scavJuice > 0 && player.hp < 100) {
               player.hp = Math.min(100, player.hp + 20);
               player.inventory.scavJuice -= 1;
-              raidUpdate += `Used Scav Juice! +20 HP. HP: ${player.hp}, Scav Juice: ${player.inventory.scavJuice}\n`;
+              raidUpdate += `Used Scav Juice! +20 HP. HP: ${player.hp}\n`;
             } else {
               raidUpdate += `No Scav Juice or full HP!\n`;
             }
           } else if (interaction.customId === 'run_raid') {
             player.active.scr += loot.scr;
-            player.active.scrapMetal += loot.scrapMetal;
-            player.active.rustShard += loot.rustShard;
-            player.active.glowDust += loot.glowDust;
             await menuMessage.edit({
-              content: `${player.name} flees ${setting.name}! Loot: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}`,
+              content: `${player.name} flees ${setting.name}! Loot: ${loot.scr.toFixed(2)} SCR`,
               components: [mainMenu]
             });
             collector.stop('run');
             resolve();
             return;
-          } else if (interaction.customId === 'continue' && enemyHp <= 0) {
-            stage++;
-            if (stage === 2) {
-              const scavengeScr = (Math.random() < 0.7 ? 0.1 : 0.05) * (1 + depth * 0.2);
-              loot.scr += scavengeScr;
-              if (Math.random() < 0.005) loot.scrapMetal += 1;
-              else if (Math.random() < 0.003) loot.rustShard += 1;
-              else if (Math.random() < 0.002) loot.glowDust += 1;
-              raidUpdate += `Scavenge: +${scavengeScr.toFixed(2)} SCR${loot.scrapMetal > 0 ? ', +1 Scrap Metal' : loot.rustShard > 0 ? ', +1 Rust Shard' : loot.glowDust > 0 ? ', +1 Glow Dust' : ''}\n`;
-            } else if (stage === 3 && setting.name === 'Death’s Hollow') {
-              setEnemy();
-              raidUpdate += `Fight: ${enemy.name} (HP: ${enemyHp}) lunges!\n`;
-            } else if (stage === 3 || (stage === 4 && setting.name === 'Death’s Hollow')) {
-              const encounters = [
-                { name: 'Radiation Leak', hpLoss: 5, scr: 0.05 },
-                { name: 'Razor Snare', hpLoss: 5, scr: 0.05 },
-                { name: 'Wasteland Stumble', hpLoss: 5, scr: 0.05 },
-                { name: 'Radiated Rat Swarm', hpLoss: 10, scr: 0.5 },
-                { name: 'Loot Cache', hpLoss: 0, scr: 0.5 }
-              ];
-              const encounter = encounters[Math.floor(Math.random() * encounters.length)];
-              const reducedLoss = Math.floor(encounter.hpLoss * (1 - player.armor * 0.1));
-              player.hp -= reducedLoss;
-              loot.scr += encounter.scr * (1 + depth * 0.2);
-              if (encounter.name === 'Loot Cache') {
-                if (Math.random() < 0.02) loot.scrapMetal += 1;
-                else if (Math.random() < 0.02) loot.rustShard += 1;
-                else if (Math.random() < 0.02) loot.glowDust += 1;
-              } else {
-                if (Math.random() < 0.005) loot.scrapMetal += 1;
-                else if (Math.random() < 0.003) loot.rustShard += 1;
-                else if (Math.random() < 0.002) loot.glowDust += 1;
-              }
-              raidUpdate += `${encounter.name}: ${encounter.hpLoss > 0 ? `-${reducedLoss} HP (reduced by ${player.armor * 10}%)` : ''}, +${(encounter.scr * (1 + depth * 0.2)).toFixed(2)} SCR${loot.scrapMetal > 0 ? ', +1 Scrap Metal' : loot.rustShard > 0 ? ', +1 Rust Shard' : loot.glowDust > 0 ? ', +1 Glow Dust' : ''}\n`;
-            }
-          } else if (interaction.customId === 'back') {
-            player.bunker.scr += loot.scr;
-            player.bunker.scrapMetal += loot.scrapMetal;
-            player.bunker.rustShard += loot.rustShard;
-            player.bunker.glowDust += loot.glowDust;
-            await menuMessage.edit({
-              content: `${player.name} returns to bunker! Stored: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}`,
-              components: [mainMenu]
-            });
-            collector.stop('back');
-            resolve();
-            return;
-          } else if (interaction.customId === 'deeper' && player.energy >= 1) {
-            player.energy -= 1;
-            depth += 1;
-            stage += 1;
-            const deeperRoll = Math.random();
-            if (deeperRoll < 0.5) {
-              setEnemy(true);
-              raidUpdate += `Deeper into ${setting.name} (Depth ${depth}): ${enemy.name} (HP: ${enemyHp}) lunges!\n`;
-            } else {
-              const encounters = [
-                { name: 'Radiation Surge', hpLoss: 10, scr: 0.1 },
-                { name: 'Toxic Winds', hpLoss: 8, scr: 0.08 },
-                { name: '_collapse Trap', hpLoss: 12, scr: 0.15 },
-                { name: 'Mutant Ambush', hpLoss: 15, scr: 0.2 },
-                { name: 'Hidden Cache', hpLoss: 0, scr: 0.75 }
-              ];
-              const encounter = encounters[Math.floor(Math.random() * encounters.length)];
-              const reducedLoss = Math.floor(encounter.hpLoss * (1 - player.armor * 0.1));
-              player.hp -= reducedLoss;
-              loot.scr += encounter.scr * (1 + depth * 0.2);
-              if (encounter.name === 'Hidden Cache') {
-                if (Math.random() < 0.03) loot.scrapMetal += 1;
-                else if (Math.random() < 0.03) loot.rustShard += 1;
-                else if (Math.random() < 0.03) loot.glowDust += 1;
-              }
-              raidUpdate += `Deeper into ${setting.name} (Depth ${depth}): ${encounter.name}: ${encounter.hpLoss > 0 ? `-${reducedLoss} HP` : ''}, +${(encounter.scr * (1 + depth * 0.2)).toFixed(2)} SCR${loot.scrapMetal > 0 ? ', +1 Scrap Metal' : loot.rustShard > 0 ? ', +1 Rust Shard' : loot.glowDust > 0 ? ', +1 Glow Dust' : ''}\n`;
-            }
           }
 
           if (player.hp <= 0) {
@@ -618,22 +526,21 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
             return;
           }
 
-          await interaction.update({ content: `${player.name} - ${setting.name}${depth > 0 ? ` (Depth ${depth})` : ''}\n${raidUpdate}HP: ${player.hp}, Energy: ${player.energy}/5${enemyHp > 0 ? `\nEnemy HP: ${enemyHp}` : ''}\nPick an action:`, components: [] });
+          await updateMenu(raidUpdate);
           collector.stop('action');
         } catch (error) {
           console.error(`Raid interaction error for ${player.name}:`, error);
           await interaction.reply({ content: 'Raid error! Check logs.', ephemeral: true });
+          collector.stop('error');
         }
       });
 
       collector.on('end', (collected, reason) => {
+        console.log(`Raid collector ended for ${player.name}. Reason: ${reason}`);
         if (reason === 'time') {
           player.active.scr += loot.scr;
-          player.active.scrapMetal += loot.scrapMetal;
-          player.active.rustShard += loot.rustShard;
-          player.active.glowDust += loot.glowDust;
           menuMessage.edit({
-            content: `${player.name} stalls! Raid ends. Loot: ${loot.scr.toFixed(2)} SCR${loot.scrapMetal > 0 ? `, ${loot.scrapMetal} Scrap Metal` : ''}${loot.rustShard > 0 ? `, ${loot.rustShard} Rust Shard${loot.rustShard > 1 ? 's' : ''}` : ''}${loot.glowDust > 0 ? `, ${loot.glowDust} Glow Dust` : ''}`,
+            content: `${player.name} stalls! Raid ends. Loot: ${loot.scr.toFixed(2)} SCR`,
             components: [mainMenu]
           });
         }
@@ -642,6 +549,7 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
     });
     saveState();
   }
+  if (enemyHp <= 0) await updateMenu(); // Final menu update after enemy dies
 }
 
 function saveState() {
