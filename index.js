@@ -20,6 +20,7 @@ const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(ADMIN_PRIVATE_KEY, 'base64'));
 
 let gameState = fs.existsSync('/data/state.json') ? JSON.parse(fs.readFileSync('/data/state.json')) : { players: {} };
+let nftCount = 0; // Tracks free NFTs—limit to 50
 
 client.on('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
@@ -326,6 +327,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
     const type = args[0]?.toLowerCase();
+    let nftType, materialsNeeded, replyText;
     if (type === 'weapon') {
       if (player.bunker.scrapMetal < 2 || player.bunker.rustShard < 1) {
         message.reply(`Need 2 Scrap Metal + 1 Rust Shard! You have: ${player.bunker.scrapMetal} Scrap Metal, ${player.bunker.rustShard} Rust Shards`);
@@ -333,7 +335,9 @@ client.on('messageCreate', async (message) => {
       }
       player.bunker.scrapMetal -= 2;
       player.bunker.rustShard -= 1;
-      message.reply(`Crafted a Rust Blade! (On-chain soon)\nEquip with !equip weapon`);
+      nftType = 'RustBlade';
+      materialsNeeded = '2 Scrap Metal + 1 Rust Shard';
+      replyText = nftCount < 50 ? 'Crafted and minted Rust Blade NFT (FREE for first 50 players)!' : 'Crafted Rust Blade! (NFT minting coming soon)';
     } else if (type === 'armor') {
       if (player.bunker.scrapMetal < 1 || player.bunker.glowDust < 1) {
         message.reply(`Need 1 Scrap Metal + 1 Glow Dust! You have: ${player.bunker.scrapMetal} Scrap Metal, ${player.bunker.glowDust} Glow Dust`);
@@ -341,10 +345,35 @@ client.on('messageCreate', async (message) => {
       }
       player.bunker.scrapMetal -= 1;
       player.bunker.glowDust -= 1;
-      message.reply(`Crafted a Glow Vest! (On-chain soon)\nEquip with !equip armor`);
+      nftType = 'GlowVest';
+      materialsNeeded = '1 Scrap Metal + 1 Glow Dust';
+      replyText = nftCount < 50 ? 'Crafted and minted Glow Vest NFT (FREE for first 50 players)!' : 'Crafted Glow Vest! (NFT minting coming soon)';
     } else {
       message.reply('Usage: !craft <weapon|armor>');
       return;
+    }
+
+    if (nftCount < 50) {
+      const tx = new Transaction();
+      const nft = tx.moveCall({
+        target: '0x2::devnet_nft::mint',
+        arguments: [
+          tx.pure(nftType),
+          tx.pure(`WSC ${nftType} for ${player.name}`),
+          tx.pure('https://ipfs.io/ipfs/QmYourIPFSHashHere') // Placeholder—update with real IPFS later
+        ],
+      });
+      tx.transferObjects([nft], player.suiAddress);
+      tx.setGasBudget(20000000);
+      const result = await suiClient.signAndExecuteTransaction({
+        transaction: tx,
+        signer: keypair,
+        options: { showEffects: true }
+      });
+      nftCount += 1;
+      message.reply(`${replyText} (Materials: ${materialsNeeded})\nTx: ${result.digest}\nEquip with !equip ${type}`);
+    } else {
+      message.reply(`${replyText} (Materials: ${materialsNeeded})\nEquip with !equip ${type}`);
     }
     saveState();
   }
