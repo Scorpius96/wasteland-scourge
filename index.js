@@ -139,7 +139,9 @@ client.on('messageCreate', async (message) => {
               { name: 'Death’s Hollow', desc: 'A pit echoes with growls...' }
             ];
             const setting = settings[Math.floor(Math.random() * settings.length)];
+            collector.stop('raid'); // Stop main collector before raid starts
             await handleRaid(player, interaction, menuMessage, setting);
+            return;
           }
         } else if (interaction.customId === 'exit') {
           await interaction.update({ content: `${player.name}, session ended. Type !wsc to return.`, components: [] });
@@ -150,7 +152,7 @@ client.on('messageCreate', async (message) => {
         saveState();
       } catch (error) {
         console.error(`Main menu error for ${player.name}:`, error.stack);
-        await interaction.reply({ content: 'Error occurred! Check logs.', ephemeral: true });
+        await interaction.update({ content: `${player.name}, error occurred! Try again.`, components: [mainMenu] }).catch(err => console.error('Failed to update on error:', err));
       }
     });
 
@@ -173,12 +175,12 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-async function handleRaid(player, interaction, menuMessage, setting) {
+async function handleRaid(player, initialInteraction, menuMessage, setting) {
   console.log(`Starting raid for ${player.name} in ${setting.name}`);
   let loot = { scr: 0 };
   let enemy = { name: 'Rust Creeper', hp: 25, attack: 5, scrMin: 0.03, scrMax: 0.05 };
   let enemyHp = enemy.hp;
-  const filter = i => i.user.id === interaction.user.id;
+  const filter = i => i.user.id === initialInteraction.user.id;
 
   const raidMenu = () => new ActionRowBuilder()
     .addComponents(
@@ -196,7 +198,7 @@ async function handleRaid(player, interaction, menuMessage, setting) {
       new ButtonBuilder().setCustomId('exit').setLabel('EXIT').setStyle(ButtonStyle.Secondary)
     );
 
-  await interaction.update({
+  await initialInteraction.update({
     content: `${player.name} - ${setting.name}\nFight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`,
     components: [raidMenu()]
   });
@@ -260,7 +262,10 @@ async function handleRaid(player, interaction, menuMessage, setting) {
       saveState();
     } catch (error) {
       console.error(`Raid error for ${player.name}:`, error.stack);
-      await raidInteraction.reply({ content: 'Raid error! Check logs.', ephemeral: true });
+      await raidInteraction.update({
+        content: `${player.name} - ${setting.name}\nError during raid! Returning to main menu.`,
+        components: [mainMenu]
+      }).catch(err => console.error('Failed to update on raid error:', err));
       collector.stop('error');
     }
   });
