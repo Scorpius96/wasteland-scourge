@@ -27,28 +27,28 @@ if (fs.existsSync('gameState.json')) {
 }
 let nftCount = 0;
 
-// Define enemies
+// Define enemies with increased difficulty
 const enemies = {
   tier1: [
-    { name: 'Rust Bandit', hpMin: 20, hpMax: 25, attackMin: 3, attackMax: 5, scrMin: 0.03, scrMax: 0.05, flavor: 'A wiry figure clad in rusted armor lunges at you!' },
-    { name: 'Glow Hound', hpMin: 25, hpMax: 30, attackMin: 4, attackMax: 6, scrMin: 0.04, scrMax: 0.06, flavor: 'Its eyes pulse with a sickly green light.' },
-    { name: 'Dust Wretch', hpMin: 20, hpMax: 30, attackMin: 3, attackMax: 5, scrMin: 0.05, scrMax: 0.07, flavor: 'It screeches through a cracked gas mask.' }
+    { name: 'Rust Bandit', hpMin: 25, hpMax: 35, attackMin: 5, attackMax: 8, scrMin: 0.03, scrMax: 0.05, flavor: 'A wiry figure clad in rusted armor lunges at you!' },
+    { name: 'Glow Hound', hpMin: 30, hpMax: 40, attackMin: 6, attackMax: 9, scrMin: 0.04, scrMax: 0.06, flavor: 'Its eyes pulse with a sickly green light.' },
+    { name: 'Dust Wretch', hpMin: 25, hpMax: 35, attackMin: 5, attackMax: 7, scrMin: 0.05, scrMax: 0.07, flavor: 'It screeches through a cracked gas mask.' }
   ],
   tier2: [
-    { name: 'Iron Maw', hpMin: 40, hpMax: 50, attackMin: 8, attackMax: 10, scrMin: 0.15, scrMax: 0.2, flavor: 'Its roar echoes through the shattered steel.' },
-    { name: 'Rad Reaver', hpMin: 35, hpMax: 45, attackMin: 7, attackMax: 9, scrMin: 0.1, scrMax: 0.15, flavor: 'It grins through a haze of rad-fueled rage.' }
+    { name: 'Iron Maw', hpMin: 50, hpMax: 60, attackMin: 10, attackMax: 14, scrMin: 0.15, scrMax: 0.2, flavor: 'Its roar echoes through the shattered steel.' },
+    { name: 'Rad Reaver', hpMin: 45, hpMax: 55, attackMin: 9, attackMax: 12, scrMin: 0.1, scrMax: 0.15, flavor: 'It grins through a haze of rad-fueled rage.' }
   ],
   tier3: [
-    { name: 'Radiated Scorpion King', hpMin: 80, hpMax: 100, attackMin: 12, attackMax: 15, scrMin: 0.5, scrMax: 1.0, flavor: 'Its glowing tail arcs high, dripping venomous light!' }
+    { name: 'Radiated Scorpion King', hpMin: 80, hpMax: 100, attackMin: 12, attackMax: 18, scrMin: 0.5, scrMax: 1.0, flavor: 'Its glowing tail arcs high, dripping venomous light!' }
   ]
 };
 
-// Define areas with weighted probabilities
+// Define areas with weighted probabilities and image URLs (placeholders)
 const settings = [
-  { name: 'City Ruins', desc: 'Crumbling towers loom...', weight: 40, tiers: [1, 2] },
-  { name: 'Glowing Dunes', desc: 'Shimmering haze drifts...', weight: 30, tiers: [1, 2] },
-  { name: 'Scav Shanties', desc: 'Huts creak in the wind...', weight: 25, tiers: [1, 2] },
-  { name: 'Death’s Hollow', desc: 'A pit echoes with growls...', weight: 5, tiers: [1, 2, 3] }
+  { name: 'City Ruins', desc: 'Crumbling towers loom...', weight: 40, tiers: [1, 2], image: 'https://via.placeholder.com/150?text=City+Ruins' },
+  { name: 'Glowing Dunes', desc: 'Shimmering haze drifts...', weight: 30, tiers: [1, 2], image: 'https://via.placeholder.com/150?text=Glowing+Dunes' },
+  { name: 'Scav Shanties', desc: 'Huts creak in the wind...', weight: 25, tiers: [1, 2], image: 'https://via.placeholder.com/150?text=Scav+Shanties' },
+  { name: 'Death’s Hollow', desc: 'A pit echoes with growls...', weight: 5, tiers: [1, 2, 3], image: 'https://via.placeholder.com/150?text=Death’s+Hollow' }
 ];
 
 // Define Cursed Loot
@@ -75,10 +75,12 @@ function getRandomEnemy(areaTiers) {
   return {
     name: baseEnemy.name,
     hp: Math.floor(Math.random() * (baseEnemy.hpMax - baseEnemy.hpMin + 1)) + baseEnemy.hpMin,
-    attack: Math.floor(Math.random() * (baseEnemy.attackMax - baseEnemy.attackMin + 1)) + baseEnemy.attackMin,
+    attackMin: baseEnemy.attackMin,
+    attackMax: baseEnemy.attackMax,
     scrMin: baseEnemy.scrMin,
     scrMax: baseEnemy.scrMax,
-    flavor: baseEnemy.flavor
+    flavor: baseEnemy.flavor,
+    tier
   };
 }
 
@@ -177,7 +179,7 @@ client.on('messageCreate', async (message) => {
         lastRaid: 0,
         lastRegen: Date.now(),
         lastEnergyRegen: Date.now(),
-        inventory: { scavJuice: 0, radPill: 0, cursedItems: [], weapons: [], armor: [] }
+        inventory: { scavJuice: 0, radPill: 0, cursedItems: [], weapons: [], armor: [], misc: [] }
       };
       player = gameState.players[message.author.id];
       await message.reply(`Registered as ${player.name} for 20 WSC! Tx: ${wscResult.digest}\nUse !menu to start playing.`);
@@ -236,7 +238,7 @@ client.on('messageCreate', async (message) => {
           player.energy -= 1;
           const setting = weightedRandom(settings);
           collector.stop('scavenge');
-          await handleRaid(player, interaction, menuMessage, setting);
+          await handleRaid(player, interaction, menuMessage, setting, 1);
           return;
         } else if (interaction.customId === 'bunker') {
           const bunkerMenu = new ActionRowBuilder()
@@ -324,7 +326,6 @@ client.on('messageCreate', async (message) => {
             });
             return;
           }
-          // Split cursed items into rows (max 5 buttons per row)
           const rows = [];
           let currentRow = new ActionRowBuilder();
           player.inventory.cursedItems.forEach((item, index) => {
@@ -421,7 +422,7 @@ client.on('messageCreate', async (message) => {
           }
         } else if (interaction.customId === 'stats') {
           await interaction.update({
-            content: `${player.name}, your stats:\nHP: ${player.hp}/100\nAttack: ${player.attack}\nArmor: ${player.armor}\nEnergy: ${player.energy}/5`,
+            content: `${player.name}, your stats:\nHP: ${player.hp}/100\nAttack: ${player.attack}\nArmor: ${player.armor} (reduces damage by ${player.armor * 10}%)\nEnergy: ${player.energy}/5`,
             components: [new ActionRowBuilder().addComponents(
               new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
             )]
@@ -429,15 +430,60 @@ client.on('messageCreate', async (message) => {
         } else if (interaction.customId === 'inventory') {
           const invMenu = new ActionRowBuilder()
             .addComponents(
-              new ButtonBuilder().setCustomId('equip').setLabel('Equip Item').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('inv_armor').setLabel('Armor').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('inv_weapons').setLabel('Weapons').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('inv_healing').setLabel('Healing').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('inv_misc').setLabel('Misc').setStyle(ButtonStyle.Primary),
               new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
             );
-          const inv = player.inventory;
-          const cursedItems = inv.cursedItems ? inv.cursedItems.map((item, i) => `${i + 1}. ${item.name} (${item.purified ? 'Purified' : 'Cursed'})`).join('\n') : 'None';
-          const weapons = inv.weapons ? inv.weapons.map((w, i) => `${i + 1}. ${w.name} (+${w.attackBonus} Attack)`).join('\n') : 'None';
-          const armor = inv.armor ? inv.armor.map((a, i) => `${i + 1}. ${a.name} (+${a.armorBonus} Armor)`).join('\n') : 'None';
           await interaction.update({
-            content: `${player.name}, your inventory:\nScav Juice: ${inv.scavJuice || 0}\nRad Pills: ${inv.radPill || 0}\nCursed Items:\n${cursedItems}\nWeapons:\n${weapons}\nArmor:\n${armor}`,
+            content: `${player.name}, your inventory:\nSelect a category to view items.`,
+            components: [invMenu]
+          });
+        } else if (interaction.customId === 'inv_armor') {
+          const inv = player.inventory;
+          const armorItems = inv.armor ? inv.armor.map((a, i) => `${i + 1}. ${a.name} (+${a.armorBonus} Armor)`).join('\n') : 'None';
+          const invMenu = new ActionRowBuilder()
+            .addComponents(
+              new ButtonBuilder().setCustomId('equip').setLabel('Equip Item').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
+            );
+          await interaction.update({
+            content: `${player.name}, your armor:\n${armorItems}`,
+            components: [invMenu]
+          });
+        } else if (interaction.customId === 'inv_weapons') {
+          const inv = player.inventory;
+          const weapons = inv.weapons ? inv.weapons.map((w, i) => `${i + 1}. ${w.name} (+${w.attackBonus} Attack)`).join('\n') : 'None';
+          const invMenu = new ActionRowBuilder()
+            .addComponents(
+              new ButtonBuilder().setCustomId('equip').setLabel('Equip Item').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
+            );
+          await interaction.update({
+            content: `${player.name}, your weapons:\n${weapons}`,
+            components: [invMenu]
+          });
+        } else if (interaction.customId === 'inv_healing') {
+          const inv = player.inventory;
+          const healingItems = `Scav Juice: ${inv.scavJuice || 0}\nRad Pills: ${inv.radPill || 0}`;
+          const invMenu = new ActionRowBuilder()
+            .addComponents(
+              new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
+            );
+          await interaction.update({
+            content: `${player.name}, your healing items:\n${healingItems}`,
+            components: [invMenu]
+          });
+        } else if (interaction.customId === 'inv_misc') {
+          const inv = player.inventory;
+          const miscItems = inv.misc ? inv.misc.map((m, i) => `${i + 1}. ${m.name}`).join('\n') : 'None';
+          const invMenu = new ActionRowBuilder()
+            .addComponents(
+              new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
+            );
+          await interaction.update({
+            content: `${player.name}, your misc items:\n${miscItems}`,
             components: [invMenu]
           });
         } else if (interaction.customId === 'equip') {
@@ -445,7 +491,6 @@ client.on('messageCreate', async (message) => {
           let equipMenu = new ActionRowBuilder();
           let componentCount = 0;
 
-          // Add weapons to equip menu
           if (player.inventory.weapons && player.inventory.weapons.length > 0) {
             player.inventory.weapons.forEach((w, i) => {
               if (componentCount >= 5) {
@@ -460,7 +505,6 @@ client.on('messageCreate', async (message) => {
             });
           }
 
-          // Add armor to equip menu
           if (player.inventory.armor && player.inventory.armor.length > 0) {
             player.inventory.armor.forEach((a, i) => {
               if (componentCount >= 5) {
@@ -475,7 +519,6 @@ client.on('messageCreate', async (message) => {
             });
           }
 
-          // Ensure there's at least one row with a back button
           if (equipMenu.components.length > 0) {
             if (equipMenu.components.length < 5) {
               equipMenu.addComponents(
@@ -510,7 +553,7 @@ client.on('messageCreate', async (message) => {
           player.equipped.armor = armor;
           player.armor = armor.armorBonus;
           await interaction.update({
-            content: `${player.name}, equipped ${armor.name}! Armor: ${player.armor}`,
+            content: `${player.name}, equipped ${armor.name}! Armor: ${player.armor} (reduces damage by ${player.armor * 10}%)`,
             components: [new ActionRowBuilder().addComponents(
               new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
             )]
@@ -549,7 +592,6 @@ client.on('messageCreate', async (message) => {
     saveState();
   }
 
-  // Backup command for admin
   if (command === 'backup') {
     if (message.author.id !== 'YOUR_ADMIN_ID') return message.reply('Admin only command.');
     const stateJson = JSON.stringify(gameState, null, 2);
@@ -560,9 +602,9 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-async function handleRaid(player, initialInteraction, menuMessage, setting) {
-  console.log(`Starting scavenge for ${player.name} in ${setting.name}`);
-  let loot = { scr: 0, scrapMetal: 0, radWaste: 0 }; // Track SCR, Scrap Metal, Rad Waste
+async function handleRaid(player, initialInteraction, menuMessage, setting, encounterCount) {
+  console.log(`Starting scavenge for ${player.name} in ${setting.name}, encounter ${encounterCount}`);
+  let loot = { scr: 0, scrapMetal: 0, radWaste: 0 }; // Track loot for this encounter
   let enemy = getRandomEnemy(setting.tiers);
   let enemyHp = enemy.hp;
   const filter = i => i.user.id === initialInteraction.user.id;
@@ -574,7 +616,7 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
       new ButtonBuilder().setCustomId('heal').setLabel('Heal').setStyle(ButtonStyle.Success)
     );
 
-  const mainMenu = new ActionRowBuilder()
+  const mainMenu = () => new ActionRowBuilder()
     .addComponents(
       new ButtonBuilder().setCustomId('scavenge').setLabel('SCAVENGE').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('bunker').setLabel('BUNKER').setStyle(ButtonStyle.Success),
@@ -582,13 +624,22 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
       new ButtonBuilder().setCustomId('stats').setLabel('STATS').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('inventory').setLabel('INVENTORY').setStyle(ButtonStyle.Secondary)
     );
-  const secondRow = new ActionRowBuilder()
+
+  const secondRow = () => new ActionRowBuilder()
     .addComponents(
       new ButtonBuilder().setCustomId('exit').setLabel('EXIT').setStyle(ButtonStyle.Secondary)
     );
 
+  const postBattleMenu = () => new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder().setCustomId('scavenge_loot').setLabel('Scavenge for Loot').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('go_further').setLabel('Go Further').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('return_main').setLabel('Return to Main Menu').setStyle(ButtonStyle.Secondary)
+    );
+
   await initialInteraction.update({
     content: `${player.name} - ${setting.name}\n${enemy.flavor}\nFight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`,
+    embeds: [{ image: { url: setting.image } }],
     components: [raidMenu()]
   });
 
@@ -604,17 +655,20 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
         enemyHp -= attack;
         raidUpdate += `${player.name} hits ${enemy.name} for ${attack}. Enemy HP: ${enemyHp}\n`;
         if (enemyHp > 0) {
-          const damage = Math.floor(enemy.attack * (1 - player.armor * 0.1));
-          player.hp -= damage;
-          raidUpdate += `${enemy.name} hits for ${damage} (reduced by ${player.armor * 10}%). HP: ${player.hp}\n`;
+          const damage = Math.floor((Math.random() * (enemy.attackMax - enemy.attackMin + 1)) + enemy.attackMin);
+          const damageReduction = player.armor * 0.1; // 10% reduction per armor point
+          const finalDamage = Math.max(0, Math.floor(damage * (1 - damageReduction)));
+          player.hp -= finalDamage;
+          raidUpdate += `${enemy.name} hits for ${finalDamage} (reduced by ${Math.floor(damageReduction * 100)}%). HP: ${player.hp}\n`;
         } else {
           let scrLoot = (Math.random() * (enemy.scrMax - enemy.scrMin) + enemy.scrMin);
-          const scrapMetal = Math.floor(Math.random() * 3) + 1; // 1-3 Scrap Metal
-          const radWaste = Math.floor(Math.random() * 2) + 1; // 1-2 Rad Waste
           loot.scr += scrLoot;
-          loot.scrapMetal += scrapMetal;
-          loot.radWaste += radWaste;
-          raidUpdate += `${enemy.name} falls! +${scrLoot.toFixed(2)} SCR, +${scrapMetal} Scrap Metal, +${radWaste} Rad Waste\n`;
+          raidUpdate += `${enemy.name} falls! +${scrLoot.toFixed(2)} SCR\n`;
+          if (enemy.name === 'Radiated Scorpion King') {
+            if (!player.inventory.misc) player.inventory.misc = [];
+            player.inventory.misc.push({ name: 'Scorpion King’s Tail', description: 'An epic trophy from the Radiated Scorpion King.' });
+            raidUpdate += `You obtained the epic Scorpion King’s Tail!\n`;
+          }
           const cursedItem = rollForCursedLoot();
           if (cursedItem) {
             if (!player.inventory.cursedItems) player.inventory.cursedItems = [];
@@ -640,9 +694,82 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
         player.active.radWaste = (player.active.radWaste || 0) + loot.radWaste;
         await raidInteraction.update({
           content: `${player.name} flees ${setting.name}! Loot: ${loot.scr.toFixed(2)} SCR, ${loot.scrapMetal} Scrap Metal, ${loot.radWaste} Rad Waste`,
-          components: [mainMenu, secondRow]
+          embeds: [{ image: { url: setting.image } }],
+          components: [mainMenu(), secondRow()]
         });
         collector.stop('run');
+        return;
+      } else if (raidInteraction.customId === 'scavenge_loot') {
+        const additionalScr = (Math.random() * 0.05).toFixed(2);
+        const scrapChance = Math.random() < 0.5 ? Math.floor(Math.random() * 2) + 1 : 0; // 50% chance for 1-2 Scrap Metal
+        const radWasteChance = Math.random() < 0.5 ? Math.floor(Math.random() * 2) + 1 : 0; // 50% chance for 1-2 Rad Waste
+        loot.scr += parseFloat(additionalScr);
+        loot.scrapMetal += scrapChance;
+        loot.radWaste += radWasteChance;
+        player.active.scr += loot.scr;
+        player.active.scrapMetal = (player.active.scrapMetal || 0) + loot.scrapMetal;
+        player.active.radWaste = (player.active.radWaste || 0) + loot.radWaste;
+        await raidInteraction.update({
+          content: `${player.name} scavenges the area...\nFound ${additionalScr} SCR, ${scrapChance} Scrap Metal, ${radWasteChance} Rad Waste.\nTotal Loot: ${player.active.scr.toFixed(2)} SCR, ${player.active.scrapMetal} Scrap Metal, ${player.active.radWaste} Rad Waste\nWhat next?`,
+          embeds: [{ image: { url: setting.image } }],
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('go_further').setLabel('Go Further').setStyle(ButtonStyle.Danger),
+              new ButtonBuilder().setCustomId('return_main').setLabel('Return to Main Menu').setStyle(ButtonStyle.Secondary)
+            )
+          ]
+        });
+        return;
+      } else if (raidInteraction.customId === 'go_further') {
+        const isDeathsHollow = setting.name === 'Death’s Hollow';
+        const encounterLimit = isDeathsHollow ? 2 : 1; // Allow up to 2 extra encounters in Death’s Hollow
+        if (encounterCount >= encounterLimit + 1) {
+          await raidInteraction.update({
+            content: `${player.name}, you've ventured far enough in ${setting.name}. Time to head back!`,
+            embeds: [{ image: { url: setting.image } }],
+            components: [mainMenu(), secondRow()]
+          });
+          collector.stop('end');
+          return;
+        }
+        const chance = Math.random();
+        if (chance < 0.7) { // 70% chance of another enemy
+          encounterCount++;
+          await handleRaid(player, raidInteraction, menuMessage, setting, encounterCount);
+          return;
+        } else { // 30% chance of a hazard
+          const hazardDamage = 5;
+          player.hp = Math.max(0, player.hp - hazardDamage);
+          if (player.hp <= 0) {
+            player.active = { scr: 0, scrapMetal: 0, radWaste: 0 };
+            player.lastRaid = Date.now();
+            await raidInteraction.update({
+              content: `${player.name}, a Rad Storm hits, dealing ${hazardDamage} damage! You collapse...\nAll active loot lost.`,
+              embeds: [{ image: { url: setting.image } }],
+              components: [mainMenu(), secondRow()]
+            });
+            collector.stop('death');
+            return;
+          }
+          await raidInteraction.update({
+            content: `${player.name}, a Rad Storm hits, dealing ${hazardDamage} damage! HP: ${player.hp}\nWhat next?`,
+            embeds: [{ image: { url: setting.image } }],
+            components: [
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('go_further').setLabel('Go Further').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId('return_main').setLabel('Return to Main Menu').setStyle(ButtonStyle.Secondary)
+              )
+            ]
+          });
+          return;
+        }
+      } else if (raidInteraction.customId === 'return_main') {
+        await raidInteraction.update({
+          content: `${player.name}, you head back from ${setting.name}.\nTotal Loot: ${player.active.scr.toFixed(2)} SCR, ${player.active.scrapMetal} Scrap Metal, ${player.active.radWaste} Rad Waste`,
+          embeds: [{ image: { url: setting.image } }],
+          components: [mainMenu(), secondRow()]
+        });
+        collector.stop('end');
         return;
       }
 
@@ -650,25 +777,34 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
         raidUpdate += `${player.name} dies! All active loot lost.\n`;
         player.active = { scr: 0, scrapMetal: 0, radWaste: 0 };
         player.lastRaid = Date.now();
-        await raidInteraction.update({ content: raidUpdate, components: [mainMenu, secondRow] });
+        await raidInteraction.update({
+          content: raidUpdate,
+          embeds: [{ image: { url: setting.image } }],
+          components: [mainMenu(), secondRow()]
+        });
         collector.stop('death');
         return;
       }
 
       const newContent = enemyHp > 0 
         ? `${player.name} - ${setting.name}\n${raidUpdate}Fight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`
-        : `${player.name} - ${setting.name}\n${raidUpdate}Enemy down! Loot: ${loot.scr.toFixed(2)} SCR, ${loot.scrapMetal} Scrap Metal, ${loot.radWaste} Rad Waste\nHP: ${player.hp}, Energy: ${player.energy}/5\nNext move:`;
+        : `${player.name} - ${setting.name}\n${raidUpdate}What next?`;
       const newComponents = enemyHp > 0 
         ? [raidMenu()]
-        : [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Scavenge').setStyle(ButtonStyle.Secondary))];
+        : [postBattleMenu()];
 
-      await raidInteraction.update({ content: newContent, components: newComponents });
+      await raidInteraction.update({
+        content: newContent,
+        embeds: [{ image: { url: setting.image } }],
+        components: newComponents
+      });
       saveState();
     } catch (error) {
       console.error(`Scavenge error for ${player.name}:`, error.stack);
       await raidInteraction.update({
         content: `${player.name} - ${setting.name}\nError during scavenge! Returning to main menu.`,
-        components: [mainMenu, secondRow]
+        embeds: [{ image: { url: setting.image } }],
+        components: [mainMenu(), secondRow()]
       }).catch(err => console.error('Failed to update on scavenge error:', err));
       collector.stop('error');
     }
@@ -681,7 +817,8 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
       player.active.radWaste = (player.active.radWaste || 0) + loot.radWaste;
       menuMessage.edit({
         content: `${player.name} stalls! Scavenge ends. Loot: ${loot.scr.toFixed(2)} SCR, ${loot.scrapMetal} Scrap Metal, ${loot.radWaste} Rad Waste`,
-        components: [mainMenu, secondRow]
+        embeds: [{ image: { url: setting.image } }],
+        components: [mainMenu(), secondRow()]
       }).catch(err => console.error('Failed to edit on scavenge end:', err));
       saveState();
     }
