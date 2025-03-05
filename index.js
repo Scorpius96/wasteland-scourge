@@ -220,7 +220,7 @@ client.on('messageCreate', async (message) => {
       components: [mainMenu, secondRow]
     });
 
-    await handleMenuInteraction(player, menuMessage);
+    await handleMenuInteraction(player, menuMessage, message.author.id);
   }
 
   if (command === 'save') {
@@ -239,8 +239,8 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-async function handleMenuInteraction(player, menuMessage) {
-  const filter = i => i.user.id === player.suiAddress.split('_')[0]; // Use Discord ID from suiAddress
+async function handleMenuInteraction(player, menuMessage, userId) {
+  const filter = i => i.user.id === userId; // Filter by Discord user ID
   const collector = menuMessage.createMessageComponentCollector({ filter, time: 300000 });
 
   const mainMenu = () => new ActionRowBuilder()
@@ -259,7 +259,7 @@ async function handleMenuInteraction(player, menuMessage) {
 
   collector.on('collect', async (interaction) => {
     try {
-      console.log(`Button clicked by ${player.name}: ${interaction.customId}`);
+      console.log(`Button clicked by ${player.name} (ID: ${interaction.user.id}): ${interaction.customId}`);
 
       if (interaction.customId === 'scavenge') {
         const now = Date.now();
@@ -278,7 +278,7 @@ async function handleMenuInteraction(player, menuMessage) {
         player.energy -= 1;
         const setting = weightedRandom(settings);
         collector.stop('scavenge');
-        await handleRaid(player, interaction, menuMessage, setting, 1);
+        await handleRaid(player, interaction, menuMessage, setting, 1, userId);
         return;
       } else if (interaction.customId === 'bunker') {
         const bunkerMenu = new ActionRowBuilder()
@@ -650,12 +650,12 @@ async function handleMenuInteraction(player, menuMessage) {
   });
 }
 
-async function handleRaid(player, initialInteraction, menuMessage, setting, encounterCount) {
+async function handleRaid(player, initialInteraction, menuMessage, setting, encounterCount, userId) {
   console.log(`Starting scavenge for ${player.name} in ${setting.name}, encounter ${encounterCount}`);
   let loot = { scr: 0, scrapMetal: 0, radWaste: 0 };
   let enemy = getRandomEnemy(setting.tiers);
   let enemyHp = enemy.hp;
-  const filter = i => i.user.id === initialInteraction.user.id;
+  const filter = i => i.user.id === userId; // Filter by Discord user ID
 
   const raidMenu = () => new ActionRowBuilder()
     .addComponents(
@@ -828,7 +828,7 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
           return;
         } else if (chance < 0.71) { // 70% chance of another enemy
           encounterCount++;
-          await handleRaid(player, raidInteraction, menuMessage, setting, encounterCount);
+          await handleRaid(player, raidInteraction, menuMessage, setting, encounterCount, userId);
           return;
         } else { // 30% chance of a hazard
           const hazardDamage = 5;
