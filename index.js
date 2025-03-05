@@ -4,6 +4,7 @@ const { Transaction } = require('@mysten/sui/transactions');
 const { Ed25519Keypair } = require('@mysten/sui/keypairs/ed25519');
 const fs = require('fs');
 const http = require('http');
+const path = require('path');
 require('dotenv').config();
 
 const client = new Client({ 
@@ -16,14 +17,18 @@ const WSC_COIN_TYPE = '0x0b8efbace2485175dba014eaca68556c113c111300e44155200d8ba
 const WSC_PRICE = 0.10;
 const ADMIN_ADDRESS = '0xdbfb5034a49be4deba3f01f1e8455148d4657f0bc4344ac5ad39c0c121f53671';
 
-// Use testnet for now, switch to mainnet for launch
 const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(ADMIN_PRIVATE_KEY, 'base64'));
 
+// Define the persistent disk path for Render
+const STATE_FILE_PATH = path.join('/opt/render/project/src/gameState', 'gameState.json');
+
 let gameState = { players: {} };
-if (fs.existsSync('gameState.json')) {
-  gameState = JSON.parse(fs.readFileSync('gameState.json'));
-  console.log('Loaded gameState from gameState.json');
+if (fs.existsSync(STATE_FILE_PATH)) {
+  gameState = JSON.parse(fs.readFileSync(STATE_FILE_PATH));
+  console.log(`Loaded gameState from ${STATE_FILE_PATH}`);
+} else {
+  console.log(`No gameState file found at ${STATE_FILE_PATH}. Starting with empty state.`);
 }
 let nftCount = 0;
 
@@ -119,6 +124,11 @@ client.on('ready', async () => {
     saveState();
     console.log('Regen ticked at', new Date().toISOString());
   }, 60 * 1000); // Check every minute
+
+  // Log every hour to confirm bot is running 24/7
+  setInterval(() => {
+    console.log(`Bot still running at ${new Date().toISOString()}`);
+  }, 60 * 60 * 1000); // Log every hour
 });
 
 client.on('messageCreate', async (message) => {
@@ -935,8 +945,10 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
 
 function saveState() {
   try {
-    fs.writeFileSync('gameState.json', JSON.stringify(gameState, null, 2));
-    console.log('State saved to gameState.json at', new Date().toISOString());
+    // Ensure the directory exists
+    fs.mkdirSync(path.dirname(STATE_FILE_PATH), { recursive: true });
+    fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(gameState, null, 2));
+    console.log(`State saved to ${STATE_FILE_PATH} at ${new Date().toISOString()}`);
   } catch (error) {
     console.error('Failed to save gameState:', error);
   }
@@ -974,4 +986,4 @@ if (!isBotRunning) {
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Bot alive');
-}).listen(8080, () => console.log('Ping server on port 8080 for UptimeRobot'));
+}).listen(8080, () => console.log('Ping server on port 8080 for Render'));
