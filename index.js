@@ -20,7 +20,6 @@ const ADMIN_ADDRESS = '0xdbfb5034a49be4deba3f01f1e8455148d4657f0bc4344ac5ad39c0c
 const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(ADMIN_PRIVATE_KEY, 'base64'));
 
-// Define the persistent disk path for Render
 const STATE_FILE_PATH = path.join('/opt/render/project/src/gameState', 'gameState.json');
 
 let gameState = { players: {} };
@@ -32,10 +31,9 @@ if (fs.existsSync(STATE_FILE_PATH)) {
 }
 let nftCount = 0;
 
-// Define enemies
 const enemies = {
   tier1: [
-    { name: 'Rust Bandit', hpMin: 25, hpMax: 35, attackMin: 5, attackMax: 8, scrMin: 0.03, scrMax: 0.05, flavor: 'A wiry figure clad in rusted armor lunges at you!' },
+    { name: 'Rust Bandit', hpMin: 25, hpMax: 35, attackMin: 5, attackMax: 8, scrMin: 0.03, scrMax: 0.05, flavor: 'A wiry Schuster clad in rusted armor lunges at you!' },
     { name: 'Glow Hound', hpMin: 30, hpMax: 40, attackMin: 6, attackMax: 9, scrMin: 0.04, scrMax: 0.06, flavor: 'Its eyes pulse with a sickly green light.' },
     { name: 'Dust Wretch', hpMin: 25, hpMax: 35, attackMin: 5, attackMax: 7, scrMin: 0.05, scrMax: 0.07, flavor: 'It screeches through a cracked gas mask.' }
   ],
@@ -48,7 +46,6 @@ const enemies = {
   ]
 };
 
-// Define areas with weighted probabilities and image URLs (placeholders)
 const settings = [
   { name: 'City Ruins', desc: 'Crumbling towers loom...', weight: 40, tiers: [1, 2], image: 'https://via.placeholder.com/150?text=City+Ruins' },
   { name: 'Glowing Dunes', desc: 'Shimmering haze drifts...', weight: 30, tiers: [1, 2], image: 'https://via.placeholder.com/150?text=Glowing+Dunes' },
@@ -56,13 +53,11 @@ const settings = [
   { name: 'Death’s Hollow', desc: 'A pit echoes with growls...', weight: 5, tiers: [1, 2, 3], image: 'https://via.placeholder.com/150?text=Death’s+Hollow' }
 ];
 
-// Define Cursed Loot
 const cursedLoot = [
   { name: 'Cursed Geiger Shard', bonus: '+50% SCR drops', bonusValue: 0.5, debuff: '-20% HP', debuffValue: 0.2 },
   { name: 'Cursed Rad Blade', bonus: '+5 Attack', bonusValue: 5, debuff: '-10% damage resistance', debuffValue: 0.1 }
 ];
 
-// Helper functions
 function weightedRandom(items) {
   const totalWeight = items.reduce((sum, item) => sum + item.weight, 0);
   let random = Math.random() * totalWeight;
@@ -125,7 +120,6 @@ client.on('ready', async () => {
     console.log('Regen ticked at', new Date().toISOString());
   }, 60 * 1000); // Check every minute
 
-  // Log every hour to confirm bot is running 24/7
   setInterval(() => {
     console.log(`Bot still running at ${new Date().toISOString()}`);
   }, 60 * 60 * 1000); // Log every hour
@@ -240,7 +234,7 @@ client.on('messageCreate', async (message) => {
 });
 
 async function handleMenuInteraction(player, menuMessage, userId) {
-  const filter = i => i.user.id === userId; // Filter by Discord user ID
+  const filter = i => i.user.id === userId;
   const collector = menuMessage.createMessageComponentCollector({ filter, time: 300000 });
 
   const mainMenu = () => new ActionRowBuilder()
@@ -655,7 +649,8 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
   let loot = { scr: 0, scrapMetal: 0, radWaste: 0 };
   let enemy = getRandomEnemy(setting.tiers);
   let enemyHp = enemy.hp;
-  const filter = i => i.user.id === userId; // Filter by Discord user ID
+  let hasScavenged = false; // Track if the player has scavenged loot after the first encounter
+  const filter = i => i.user.id === userId;
 
   const raidMenu = () => new ActionRowBuilder()
     .addComponents(
@@ -678,9 +673,13 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
       new ButtonBuilder().setCustomId('exit').setLabel('EXIT').setStyle(ButtonStyle.Secondary)
     );
 
-  const postBattleMenu = () => new ActionRowBuilder()
+  const scavengeMenu = () => new ActionRowBuilder()
     .addComponents(
-      new ButtonBuilder().setCustomId('scavenge_loot').setLabel('Scavenge for Loot').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('scavenge_loot').setLabel('Scavenge for Loot').setStyle(ButtonStyle.Primary)
+    );
+
+  const postScavengeMenu = () => new ActionRowBuilder()
+    .addComponents(
       new ButtonBuilder().setCustomId('go_further').setLabel('Go Further').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('back_to_bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success)
     );
@@ -761,22 +760,19 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
         player.active.scr += loot.scr;
         player.active.scrapMetal = (player.active.scrapMetal || 0) + loot.scrapMetal;
         player.active.radWaste = (player.active.radWaste || 0) + loot.radWaste;
+        hasScavenged = true;
         await raidInteraction.update({
           content: `${player.name} scavenges the area...\nFound ${additionalScr} SCR, ${scrapChance} Scrap Metal, ${radWasteChance} Rad Waste.\nTotal Loot: ${player.active.scr.toFixed(2)} SCR, ${player.active.scrapMetal} Scrap Metal, ${player.active.radWaste} Rad Waste\nWhat next?`,
           embeds: [{ image: { url: setting.image } }],
-          components: [
-            new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('go_further').setLabel('Go Further').setStyle(ButtonStyle.Danger),
-              new ButtonBuilder().setCustomId('back_to_bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success)
-            )
-          ]
+          components: [postScavengeMenu()]
         });
         return;
       } else if (raidInteraction.customId === 'go_further') {
+        await raidInteraction.deferUpdate(); // Defer to avoid timeout
         const isDeathsHollow = setting.name === 'Death’s Hollow';
-        const encounterLimit = isDeathsHollow ? 3 : 2; // 2 encounters total in easy areas, 3 in Death’s Hollow
+        const encounterLimit = isDeathsHollow ? 3 : 2;
         if (encounterCount >= encounterLimit) {
-          await raidInteraction.update({
+          await raidInteraction.editReply({
             content: `${player.name}, you've ventured far enough in ${setting.name}. Time to head back!`,
             embeds: [{ image: { url: setting.image } }],
             components: [
@@ -790,9 +786,9 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
         }
         const chance = Math.random();
         if (chance < 0.01) { // 1% chance of Loot Cache
-          const cacheScr = (Math.random() * 1 + 1).toFixed(2); // 1-2 SCR
-          const cacheScrap = Math.floor(Math.random() * 6) + 5; // 5-10 Scrap Metal
-          const cacheRadWaste = Math.floor(Math.random() * 6) + 5; // 5-10 Rad Waste
+          const cacheScr = (Math.random() * 1 + 1).toFixed(2);
+          const cacheScrap = Math.floor(Math.random() * 6) + 5;
+          const cacheRadWaste = Math.floor(Math.random() * 6) + 5;
           loot.scr += parseFloat(cacheScr);
           loot.scrapMetal += cacheScrap;
           loot.radWaste += cacheRadWaste;
@@ -815,20 +811,22 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
           player.active.scr += loot.scr;
           player.active.scrapMetal = (player.active.scrapMetal || 0) + loot.scrapMetal;
           player.active.radWaste = (player.active.radWaste || 0) + loot.radWaste;
-          await raidInteraction.update({
+          await raidInteraction.editReply({
             content: cacheMessage + `\nTotal Loot: ${player.active.scr.toFixed(2)} SCR, ${player.active.scrapMetal} Scrap Metal, ${player.active.radWaste} Rad Waste\nWhat next?`,
             embeds: [{ image: { url: setting.image } }],
-            components: [
-              new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('go_further').setLabel('Go Further').setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId('back_to_bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success)
-              )
-            ]
+            components: [postScavengeMenu()]
           });
           return;
         } else if (chance < 0.71) { // 70% chance of another enemy
           encounterCount++;
-          await handleRaid(player, raidInteraction, menuMessage, setting, encounterCount, userId);
+          enemy = getRandomEnemy(setting.tiers);
+          enemyHp = enemy.hp;
+          hasScavenged = false; // Reset scavenging for the new encounter
+          await raidInteraction.editReply({
+            content: `${player.name} - ${setting.name}\n${enemy.flavor}\nFight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`,
+            embeds: [{ image: { url: setting.image } }],
+            components: [raidMenu()]
+          });
           return;
         } else { // 30% chance of a hazard
           const hazardDamage = 5;
@@ -836,7 +834,7 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
           if (player.hp <= 0) {
             player.active = { scr: 0, scrapMetal: 0, radWaste: 0 };
             player.lastRaid = Date.now();
-            await raidInteraction.update({
+            await raidInteraction.editReply({
               content: `${player.name}, a Rad Storm hits, dealing ${hazardDamage} damage! You collapse...\nAll active loot lost.`,
               embeds: [{ image: { url: setting.image } }],
               components: [
@@ -848,15 +846,10 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
             collector.stop('death');
             return;
           }
-          await raidInteraction.update({
+          await raidInteraction.editReply({
             content: `${player.name}, a Rad Storm hits, dealing ${hazardDamage} damage! HP: ${player.hp}\nWhat next?`,
             embeds: [{ image: { url: setting.image } }],
-            components: [
-              new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('go_further').setLabel('Go Further').setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId('back_to_bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success)
-              )
-            ]
+            components: [postScavengeMenu()]
           });
           return;
         }
@@ -897,10 +890,12 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
 
       const newContent = enemyHp > 0 
         ? `${player.name} - ${setting.name}\n${raidUpdate}Fight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`
-        : `${player.name} - ${setting.name}\n${raidUpdate}What next?`;
+        : `${player.name} - ${setting.name}\n${raidUpdate}Please scavenge the area before proceeding.`;
       const newComponents = enemyHp > 0 
         ? [raidMenu()]
-        : [postBattleMenu()];
+        : encounterCount === 1 && !hasScavenged
+          ? [scavengeMenu()]
+          : [postScavengeMenu()];
 
       await raidInteraction.update({
         content: newContent,
@@ -945,7 +940,6 @@ async function handleRaid(player, initialInteraction, menuMessage, setting, enco
 
 function saveState() {
   try {
-    // Ensure the directory exists
     fs.mkdirSync(path.dirname(STATE_FILE_PATH), { recursive: true });
     fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(gameState, null, 2));
     console.log(`State saved to ${STATE_FILE_PATH} at ${new Date().toISOString()}`);
