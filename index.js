@@ -440,7 +440,6 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
   const setEnemy = () => {
     const enemies = [
       { name: 'Rust Creeper', hpMin: 20, hpMax: 25, attackMin: 3, attackMax: 5, scrMin: 0.03, scrMax: 0.05 }
-      // Simplified to one enemy for debugging—add others back later
     ];
     enemy = enemies[0];
     enemyHp = Math.floor(Math.random() * (enemy.hpMax - enemy.hpMin + 1)) + enemy.hpMin;
@@ -471,85 +470,94 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
       console.log(`Updating menu: ${content}`);
       await menuMessage.edit({ content, components });
     } catch (error) {
-      console.error(`Menu update error for ${player.name}:`, error);
+      console.error(`Menu update error for ${player.name}:`, error.stack);
       await menuMessage.edit({ content: `${player.name}, raid error occurred. Check logs.`, components: [mainMenu] });
+      throw error; // Re-throw to stop the raid
     }
   };
 
   setEnemy();
   while (player.hp > 0 && enemyHp > 0) {
-    await updateMenu();
-    const collector = menuMessage.createMessageComponentCollector({ filter, time: 600000 });
-    await new Promise((resolve) => {
-      collector.on('collect', async (interaction) => {
-        let raidUpdate = '';
-        try {
-          if (interaction.customId === 'attack' && enemyHp > 0) {
-            const attack = player.equipped.weapon ? player.attack + 5 : player.attack;
-            enemyHp -= attack;
-            raidUpdate += `${player.name} hits ${enemy.name} for ${attack}. Enemy HP: ${enemyHp}\n`;
-            if (enemyHp > 0) {
-              const damage = Math.floor(enemyAttack * (1 - player.armor * 0.1));
-              player.hp -= damage;
-              raidUpdate += `${enemy.name} hits for ${damage} (reduced by ${player.armor * 10}%). HP: ${player.hp}\n`;
-            } else {
-              const scrLoot = (Math.random() * (enemy.scrMax - enemy.scrMin) + enemy.scrMin);
-              loot.scr += scrLoot;
-              raidUpdate += `${enemy.name} falls! +${scrLoot.toFixed(2)} SCR\n`;
+    try {
+      await updateMenu();
+      const collector = menuMessage.createMessageComponentCollector({ filter, time: 600000 });
+      await new Promise((resolve) => {
+        collector.on('collect', async (interaction) => {
+          try {
+            console.log(`Processing ${interaction.customId} for ${player.name}`);
+            await interaction.deferUpdate(); // Acknowledge interaction immediately
+            let raidUpdate = '';
+
+            if (interaction.customId === 'attack' && enemyHp > 0) {
+              const attack = player.equipped.weapon ? player.attack + 5 : player.attack;
+              enemyHp -= attack;
+              raidUpdate += `${player.name} hits ${enemy.name} for ${attack}. Enemy HP: ${enemyHp}\n`;
+              if (enemyHp > 0) {
+                const damage = Math.floor(enemyAttack * (1 - player.armor * 0.1));
+                player.hp -= damage;
+                raidUpdate += `${enemy.name} hits for ${damage} (reduced by ${player.armor * 10}%). HP: ${player.hp}\n`;
+              } else {
+                const scrLoot = (Math.random() * (enemy.scrMax - enemy.scrMin) + enemy.scrMin);
+                loot.scr += scrLoot;
+                raidUpdate += `${enemy.name} falls! +${scrLoot.toFixed(2)} SCR\n`;
+              }
+            } else if (interaction.customId === 'heal') {
+              if (player.inventory.scavJuice > 0 && player.hp < 100) {
+                player.hp = Math.min(100, player.hp + 20);
+                player.inventory.scavJuice -= 1;
+                raidUpdate += `Used Scav Juice! +20 HP. HP: ${player.hp}\n`;
+              } else {
+                raidUpdate += `No Scav Juice or full HP!\n`;
+              }
+            } else if (interaction.customId === 'run_raid') {
+              player.active.scr += loot.scr;
+              await menuMessage.edit({
+                content: `${player.name} flees ${setting.name}! Loot: ${loot.scr.toFixed(2)} SCR`,
+                components: [mainMenu]
+              });
+              collector.stop('run');
+              resolve();
+              return;
             }
-          } else if (interaction.customId === 'heal') {
-            if (player.inventory.scavJuice > 0 && player.hp < 100) {
-              player.hp = Math.min(100, player.hp + 20);
-              player.inventory.scavJuice -= 1;
-              raidUpdate += `Used Scav Juice! +20 HP. HP: ${player.hp}\n`;
-            } else {
-              raidUpdate += `No Scav Juice or full HP!\n`;
+
+            if (player.hp <= 0) {
+              raidUpdate += `${player.name} dies! All active loot lost.\n`;
+              player.active = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
+              player.lastRaid = Date.now();
+              await menuMessage.edit({ content: raidUpdate, components: [mainMenu] });
+              collector.stop('death');
+              resolve();
+              return;
             }
-          } else if (interaction.customId === 'run_raid') {
+
+            await updateMenu(raidUpdate);
+            collector.stop('action');
+          } catch (error) {
+            console.error(`Raid action error for ${player.name}:`, error.stack);
+            await interaction.followUp({ content: 'Raid error! Check logs.', ephemeral: true });
+            collector.stop('error');
+          }
+        });
+
+        collector.on('end', (collected, reason) => {
+          console.log(`Raid collector ended for ${player.name}. Reason: ${reason}`);
+          if (reason === 'time') {
             player.active.scr += loot.scr;
-            await menuMessage.edit({
-              content: `${player.name} flees ${setting.name}! Loot: ${loot.scr.toFixed(2)} SCR`,
+            menuMessage.edit({
+              content: `${player.name} stalls! Raid ends. Loot: ${loot.scr.toFixed(2)} SCR`,
               components: [mainMenu]
             });
-            collector.stop('run');
-            resolve();
-            return;
           }
-
-          if (player.hp <= 0) {
-            raidUpdate += `${player.name} dies! All active loot lost.\n`;
-            player.active = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
-            player.lastRaid = Date.now();
-            await menuMessage.edit({ content: raidUpdate, components: [mainMenu] });
-            collector.stop('death');
-            resolve();
-            return;
-          }
-
-          await updateMenu(raidUpdate);
-          collector.stop('action');
-        } catch (error) {
-          console.error(`Raid interaction error for ${player.name}:`, error);
-          await interaction.reply({ content: 'Raid error! Check logs.', ephemeral: true });
-          collector.stop('error');
-        }
+          resolve();
+        });
       });
-
-      collector.on('end', (collected, reason) => {
-        console.log(`Raid collector ended for ${player.name}. Reason: ${reason}`);
-        if (reason === 'time') {
-          player.active.scr += loot.scr;
-          menuMessage.edit({
-            content: `${player.name} stalls! Raid ends. Loot: ${loot.scr.toFixed(2)} SCR`,
-            components: [mainMenu]
-          });
-        }
-        resolve();
-      });
-    });
-    saveState();
+      saveState();
+    } catch (error) {
+      console.error(`Raid loop error for ${player.name}:`, error.stack);
+      break; // Exit loop on critical error
+    }
   }
-  if (enemyHp <= 0) await updateMenu(); // Final menu update after enemy dies
+  if (enemyHp <= 0) await updateMenu(); // Final update after enemy dies
 }
 
 function saveState() {
