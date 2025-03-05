@@ -129,14 +129,15 @@ client.on('messageCreate', async (message) => {
   const command = args.shift().toLowerCase();
   let player = gameState.players[message.author.id] || {};
 
-  if (command === 'register') {
+  // Handle both !register and !wsc for registration
+  if (command === 'register' || command === 'wsc') {
     if (player.suiAddress) {
-      await message.reply('You’re already registered!');
+      await message.reply('You’re already registered! Use !menu to play.');
       return;
     }
     const suiAddress = args[0];
     if (!suiAddress || !suiAddress.startsWith('0x') || suiAddress.length !== 66) {
-      await message.reply('Use: !register <Sui Address> <Name>');
+      await message.reply('Use: !register <Sui Address> <Name> or !wsc <Sui Address> <Name>');
       return;
     }
     const wscCost = Math.round(2 / WSC_PRICE) * 1000000;
@@ -179,7 +180,7 @@ client.on('messageCreate', async (message) => {
         inventory: { scavJuice: 0, radPill: 0, cursedItems: [], weapons: [], armor: [] }
       };
       player = gameState.players[message.author.id];
-      await message.reply(`Registered as ${player.name} for 20 WSC! Tx: ${wscResult.digest}`);
+      await message.reply(`Registered as ${player.name} for 20 WSC! Tx: ${wscResult.digest}\nUse !menu to start playing.`);
       saveState();
     } catch (error) {
       await message.reply(`Registration failed: ${error.message}\nAdmin wallet needs WSC (20M raw) and SUI gas (20M raw).`);
@@ -190,7 +191,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'menu') {
     if (!player.suiAddress) {
-      await message.reply('You need to register first! Use: !register <Sui Address> <Name>');
+      await message.reply('You need to register first! Use: !register <Sui Address> <Name> or !wsc <Sui Address> <Name>');
       return;
     }
 
@@ -200,13 +201,16 @@ client.on('messageCreate', async (message) => {
         new ButtonBuilder().setCustomId('bunker').setLabel('BUNKER').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId('store').setLabel('STORE').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('stats').setLabel('STATS').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('inventory').setLabel('INVENTORY').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('inventory').setLabel('INVENTORY').setStyle(ButtonStyle.Secondary)
+      );
+    const secondRow = new ActionRowBuilder()
+      .addComponents(
         new ButtonBuilder().setCustomId('exit').setLabel('EXIT').setStyle(ButtonStyle.Secondary)
       );
 
     const menuMessage = await message.reply({
       content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
-      components: [mainMenu]
+      components: [mainMenu, secondRow]
     });
 
     const filter = i => i.user.id === message.author.id;
@@ -221,12 +225,12 @@ client.on('messageCreate', async (message) => {
             const timeSinceDeath = now - player.lastRaid;
             if (timeSinceDeath < 24 * 60 * 60 * 1000) {
               const waitRemaining = Math.ceil((24 * 60 * 60 * 1000 - timeSinceDeath) / (60 * 1000));
-              await interaction.update({ content: `${player.name}, you’re dead! Wait ${waitRemaining} minutes to respawn.`, components: [mainMenu] });
+              await interaction.update({ content: `${player.name}, you’re dead! Wait ${waitRemaining} minutes to respawn.`, components: [mainMenu, secondRow] });
               return;
             }
           }
           if (player.energy < 1) {
-            await interaction.update({ content: `${player.name}, out of energy! Regen 1/hour. Energy: ${player.energy}/5`, components: [mainMenu] });
+            await interaction.update({ content: `${player.name}, out of energy! Regen 1/hour. Energy: ${player.energy}/5`, components: [mainMenu, secondRow] });
             return;
           }
           player.energy -= 1;
@@ -320,20 +324,33 @@ client.on('messageCreate', async (message) => {
             });
             return;
           }
-          const purifyMenu = new ActionRowBuilder();
+          // Split cursed items into rows (max 5 buttons per row)
+          const rows = [];
+          let currentRow = new ActionRowBuilder();
           player.inventory.cursedItems.forEach((item, index) => {
             if (!item.purified) {
-              purifyMenu.addComponents(
+              if (currentRow.components.length >= 5) {
+                rows.push(currentRow);
+                currentRow = new ActionRowBuilder();
+              }
+              currentRow.addComponents(
                 new ButtonBuilder().setCustomId(`purify_${index}`).setLabel(`Purify ${item.name} (5 SCR)`).setStyle(ButtonStyle.Secondary)
               );
             }
           });
-          purifyMenu.addComponents(
-            new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
-          );
+          if (currentRow.components.length > 0) {
+            currentRow.addComponents(
+              new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+            );
+            rows.push(currentRow);
+          } else {
+            rows.push(new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+            ));
+          }
           await interaction.update({
             content: `${player.name}, select a cursed item to purify:`,
-            components: [purifyMenu]
+            components: rows
           });
         } else if (interaction.customId.startsWith('purify_')) {
           const index = parseInt(interaction.customId.split('_')[1]);
@@ -424,27 +441,57 @@ client.on('messageCreate', async (message) => {
             components: [invMenu]
           });
         } else if (interaction.customId === 'equip') {
-          const equipMenu = new ActionRowBuilder();
+          const rows = [];
+          let equipMenu = new ActionRowBuilder();
+          let componentCount = 0;
+
+          // Add weapons to equip menu
           if (player.inventory.weapons && player.inventory.weapons.length > 0) {
             player.inventory.weapons.forEach((w, i) => {
+              if (componentCount >= 5) {
+                rows.push(equipMenu);
+                equipMenu = new ActionRowBuilder();
+                componentCount = 0;
+              }
               equipMenu.addComponents(
                 new ButtonBuilder().setCustomId(`equip_weapon_${i}`).setLabel(`Equip ${w.name}`).setStyle(ButtonStyle.Primary)
               );
+              componentCount++;
             });
           }
+
+          // Add armor to equip menu
           if (player.inventory.armor && player.inventory.armor.length > 0) {
             player.inventory.armor.forEach((a, i) => {
+              if (componentCount >= 5) {
+                rows.push(equipMenu);
+                equipMenu = new ActionRowBuilder();
+                componentCount = 0;
+              }
               equipMenu.addComponents(
                 new ButtonBuilder().setCustomId(`equip_armor_${i}`).setLabel(`Equip ${a.name}`).setStyle(ButtonStyle.Primary)
               );
+              componentCount++;
             });
           }
-          equipMenu.addComponents(
-            new ButtonBuilder().setCustomId('inventory').setLabel('Back').setStyle(ButtonStyle.Secondary)
-          );
+
+          // Ensure there's at least one row with a back button
+          if (equipMenu.components.length > 0) {
+            if (equipMenu.components.length < 5) {
+              equipMenu.addComponents(
+                new ButtonBuilder().setCustomId('inventory').setLabel('Back').setStyle(ButtonStyle.Secondary)
+              );
+            }
+            rows.push(equipMenu);
+          } else {
+            rows.push(new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('inventory').setLabel('Back').setStyle(ButtonStyle.Secondary)
+            ));
+          }
+
           await interaction.update({
             content: `${player.name}, select an item to equip:`,
-            components: [equipMenu]
+            components: rows
           });
         } else if (interaction.customId.startsWith('equip_weapon_')) {
           const index = parseInt(interaction.customId.split('_')[2]);
@@ -471,7 +518,7 @@ client.on('messageCreate', async (message) => {
         } else if (interaction.customId === 'back') {
           await interaction.update({
             content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
-            components: [mainMenu]
+            components: [mainMenu, secondRow]
           });
         } else if (interaction.customId === 'exit') {
           await interaction.update({ content: `${player.name}, session ended. Type !menu to return.`, components: [] });
@@ -480,7 +527,7 @@ client.on('messageCreate', async (message) => {
         saveState();
       } catch (error) {
         console.error(`Menu error for ${player.name}:`, error.stack);
-        await interaction.update({ content: `${player.name}, error occurred! Try again.`, components: [mainMenu] });
+        await interaction.update({ content: `${player.name}, error occurred! Try again.`, components: [mainMenu, secondRow] }).catch(err => console.error('Failed to update on error:', err));
       }
     });
 
@@ -500,6 +547,16 @@ client.on('messageCreate', async (message) => {
     console.log('Current gameState:', JSON.stringify(gameState, null, 2));
     await message.reply('Game state logged to console—check Render logs!');
     saveState();
+  }
+
+  // Backup command for admin
+  if (command === 'backup') {
+    if (message.author.id !== 'YOUR_ADMIN_ID') return message.reply('Admin only command.');
+    const stateJson = JSON.stringify(gameState, null, 2);
+    await message.reply({
+      content: 'Game state backup:',
+      files: [{ attachment: Buffer.from(stateJson), name: 'gameState.json' }]
+    });
   }
 });
 
@@ -523,7 +580,10 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
       new ButtonBuilder().setCustomId('bunker').setLabel('BUNKER').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('store').setLabel('STORE').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('stats').setLabel('STATS').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('inventory').setLabel('INVENTORY').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('inventory').setLabel('INVENTORY').setStyle(ButtonStyle.Secondary)
+    );
+  const secondRow = new ActionRowBuilder()
+    .addComponents(
       new ButtonBuilder().setCustomId('exit').setLabel('EXIT').setStyle(ButtonStyle.Secondary)
     );
 
@@ -580,7 +640,7 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
         player.active.radWaste = (player.active.radWaste || 0) + loot.radWaste;
         await raidInteraction.update({
           content: `${player.name} flees ${setting.name}! Loot: ${loot.scr.toFixed(2)} SCR, ${loot.scrapMetal} Scrap Metal, ${loot.radWaste} Rad Waste`,
-          components: [mainMenu]
+          components: [mainMenu, secondRow]
         });
         collector.stop('run');
         return;
@@ -590,7 +650,7 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
         raidUpdate += `${player.name} dies! All active loot lost.\n`;
         player.active = { scr: 0, scrapMetal: 0, radWaste: 0 };
         player.lastRaid = Date.now();
-        await raidInteraction.update({ content: raidUpdate, components: [mainMenu] });
+        await raidInteraction.update({ content: raidUpdate, components: [mainMenu, secondRow] });
         collector.stop('death');
         return;
       }
@@ -608,8 +668,8 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
       console.error(`Scavenge error for ${player.name}:`, error.stack);
       await raidInteraction.update({
         content: `${player.name} - ${setting.name}\nError during scavenge! Returning to main menu.`,
-        components: [mainMenu]
-      });
+        components: [mainMenu, secondRow]
+      }).catch(err => console.error('Failed to update on scavenge error:', err));
       collector.stop('error');
     }
   });
@@ -617,12 +677,11 @@ async function handleRaid(player, initialInteraction, menuMessage, setting) {
   collector.on('end', (collected, reason) => {
     console.log(`Scavenge collector ended for ${player.name}. Reason: ${reason}`);
     if (reason === 'time') {
-      player.active.scr += loot.scr;
       player.active.scrapMetal = (player.active.scrapMetal || 0) + loot.scrapMetal;
       player.active.radWaste = (player.active.radWaste || 0) + loot.radWaste;
       menuMessage.edit({
         content: `${player.name} stalls! Scavenge ends. Loot: ${loot.scr.toFixed(2)} SCR, ${loot.scrapMetal} Scrap Metal, ${loot.radWaste} Rad Waste`,
-        components: [mainMenu]
+        components: [mainMenu, secondRow]
       }).catch(err => console.error('Failed to edit on scavenge end:', err));
       saveState();
     }
