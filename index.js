@@ -447,49 +447,28 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
     console.log(`Enemy set: ${enemy.name}, HP: ${enemyHp}, Attack: ${enemyAttack}`);
   };
 
-  const updateMenu = async (raidUpdate = '') => {
-    try {
-      const attack = player.equipped.weapon ? player.attack + 5 : player.attack;
-      let content = `${player.name} - ${setting.name}\n${raidUpdate}`;
-      let components = [];
-      if (enemyHp > 0) {
-        content += `Fight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`;
-        components = [new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder().setCustomId('attack').setLabel('Attack').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('heal').setLabel('Heal').setStyle(ButtonStyle.Success)
-          )];
-      } else {
-        content += `Enemy down! Loot: ${loot.scr.toFixed(2)} SCR\nHP: ${player.hp}, Energy: ${player.energy}/5\nNext move:`;
-        components = [new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary)
-          )];
-      }
-      console.log(`Updating menu: ${content}`);
-      await menuMessage.edit({ content, components });
-    } catch (error) {
-      console.error(`Menu update error for ${player.name}:`, error.stack);
-      await menuMessage.edit({ content: `${player.name}, raid error occurred. Check logs.`, components: [mainMenu] });
-      throw error; // Re-throw to stop the raid
-    }
-  };
-
   setEnemy();
   while (player.hp > 0 && enemyHp > 0) {
     try {
-      await updateMenu();
+      const attack = player.equipped.weapon ? player.attack + 5 : player.attack;
+      let content = `${player.name} - ${setting.name}\nFight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`;
+      let components = [new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder().setCustomId('attack').setLabel('Attack').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('heal').setLabel('Heal').setStyle(ButtonStyle.Success)
+        )];
+      console.log(`Initial menu: ${content}`);
+      await menuMessage.edit({ content, components });
+
       const collector = menuMessage.createMessageComponentCollector({ filter, time: 600000 });
       await new Promise((resolve) => {
         collector.on('collect', async (interaction) => {
           try {
             console.log(`Processing ${interaction.customId} for ${player.name}`);
-            await interaction.deferUpdate(); // Acknowledge interaction immediately
             let raidUpdate = '';
 
             if (interaction.customId === 'attack' && enemyHp > 0) {
-              const attack = player.equipped.weapon ? player.attack + 5 : player.attack;
               enemyHp -= attack;
               raidUpdate += `${player.name} hits ${enemy.name} for ${attack}. Enemy HP: ${enemyHp}\n`;
               if (enemyHp > 0) {
@@ -511,7 +490,7 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
               }
             } else if (interaction.customId === 'run_raid') {
               player.active.scr += loot.scr;
-              await menuMessage.edit({
+              await interaction.update({
                 content: `${player.name} flees ${setting.name}! Loot: ${loot.scr.toFixed(2)} SCR`,
                 components: [mainMenu]
               });
@@ -524,17 +503,32 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
               raidUpdate += `${player.name} dies! All active loot lost.\n`;
               player.active = { scr: 0, scrapMetal: 0, rustShard: 0, glowDust: 0 };
               player.lastRaid = Date.now();
-              await menuMessage.edit({ content: raidUpdate, components: [mainMenu] });
+              await interaction.update({ content: raidUpdate, components: [mainMenu] });
               collector.stop('death');
               resolve();
               return;
             }
 
-            await updateMenu(raidUpdate);
+            const newContent = enemyHp > 0 
+              ? `${player.name} - ${setting.name}\n${raidUpdate}Fight: ${enemy.name} (HP: ${enemyHp}) lunges!\nHP: ${player.hp}, Energy: ${player.energy}/5\nPick an action:`
+              : `${player.name} - ${setting.name}\n${raidUpdate}Enemy down! Loot: ${loot.scr.toFixed(2)} SCR\nHP: ${player.hp}, Energy: ${player.energy}/5\nNext move:`;
+            const newComponents = enemyHp > 0 
+              ? [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('attack').setLabel('Attack').setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId('heal').setLabel('Heal').setStyle(ButtonStyle.Success)
+                  )]
+              : [new ActionRowBuilder()
+                  .addComponents(
+                    new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary)
+                  )];
+            console.log(`Updating menu after ${interaction.customId}: ${newContent}`);
+            await interaction.update({ content: newContent, components: newComponents });
             collector.stop('action');
           } catch (error) {
             console.error(`Raid action error for ${player.name}:`, error.stack);
-            await interaction.followUp({ content: 'Raid error! Check logs.', ephemeral: true });
+            await interaction.reply({ content: 'Raid error! Check logs.', ephemeral: true });
             collector.stop('error');
           }
         });
@@ -554,10 +548,19 @@ async function handleRaid(player, menuMessage, setting, depth = 0) {
       saveState();
     } catch (error) {
       console.error(`Raid loop error for ${player.name}:`, error.stack);
-      break; // Exit loop on critical error
+      await menuMessage.edit({ content: `${player.name}, raid crashed. Check logs.`, components: [mainMenu] });
+      break;
     }
   }
-  if (enemyHp <= 0) await updateMenu(); // Final update after enemy dies
+  if (enemyHp <= 0) {
+    await menuMessage.edit({
+      content: `${player.name} - ${setting.name}\nEnemy down! Loot: ${loot.scr.toFixed(2)} SCR\nHP: ${player.hp}, Energy: ${player.energy}/5\nNext move:`,
+      components: [new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder().setCustomId('run_raid').setLabel('Abandon Raid').setStyle(ButtonStyle.Secondary)
+        )]
+    });
+  }
 }
 
 function saveState() {
