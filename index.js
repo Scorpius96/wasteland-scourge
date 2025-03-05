@@ -19,7 +19,7 @@ const ADMIN_ADDRESS = '0xdbfb5034a49be4deba3f01f1e8455148d4657f0bc4344ac5ad39c0c
 const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(ADMIN_PRIVATE_KEY, 'base64'));
 
-let gameState = fs.existsSync('/data/state.json') ? JSON.parse(fs.readFileSync('/data/state.json')) : { players: {} };
+let gameState = { players: {} }; // Memory-only state
 let nftCount = 0;
 
 client.on('ready', async () => {
@@ -81,7 +81,7 @@ client.on('messageCreate', async (message) => {
           lastRaid: 0, inventory: { scavJuice: 1 } 
         };
         player = gameState.players[message.author.id];
-        message.reply(`Registered as ${player.name} for 20 WSC! Tx: ${wscResult.digest}`);
+        await message.reply(`Registered as ${player.name} for 20 WSC! Tx: ${wscResult.digest}`);
         saveState();
       } catch (error) {
         message.reply(`Registration failed: ${error.message}\nAdmin wallet needs WSC (20M raw) and SUI gas (20M raw).`);
@@ -105,7 +105,7 @@ client.on('messageCreate', async (message) => {
     });
 
     const filter = i => i.user.id === message.author.id;
-    const collector = menuMessage.createMessageComponentCollector({ filter, time: 300000 }); // 5 min timeout
+    const collector = menuMessage.createMessageComponentCollector({ filter, time: 300000 });
 
     collector.on('collect', async (interaction) => {
       await interaction.deferUpdate();
@@ -482,32 +482,18 @@ client.on('messageCreate', async (message) => {
           let storeUpdate = '';
 
           if (storeInteraction.customId === 'buy_juice') {
-            storeUpdate = `${player.name} - Buy 1 Scav Juice for 5 SCR?\nConfirm:`;
-            components = [new ActionRowBuilder()
-              .addComponents(
-                new ButtonBuilder().setCustomId('confirm_juice').setLabel('Confirm').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('back_store').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-              )];
-          } else if (storeInteraction.customId === 'confirm_juice') {
             player.active.scr -= 5;
             player.inventory.scavJuice += 1;
-            storeUpdate = `${player.name} bought 1 Scav Juice!\nScav Juice: ${player.inventory.scavJuice}, Active SCR: ${player.active.scr}`;
+            storeUpdate = `${player.name} bought 1 Scav Juice for 5 SCR!\nScav Juice: ${player.inventory.scavJuice}`;
             components = [new ActionRowBuilder()
               .addComponents(
                 new ButtonBuilder().setCustomId('back').setLabel('Back to Main').setStyle(ButtonStyle.Secondary)
-              )];
-          } else if (storeInteraction.customId === 'back_store') {
-            storeUpdate = `${player.name} - Wasteland Trader: What’s your poison?\nActive SCR: ${player.active.scr}`;
-            components = [new ActionRowBuilder()
-              .addComponents(
-                new ButtonBuilder().setCustomId('buy_juice').setLabel('Buy Scav Juice (5 SCR)').setStyle(ButtonStyle.Primary).setDisabled(player.active.scr < 5),
-                new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
               )];
           } else if (storeInteraction.customId === 'back') {
             storeCollector.stop('back');
           }
 
-          await menuMessage.edit({ content: storeUpdate, components });
+          await menuMessage.edit({ content: storeUpdate || `${player.name} - Wasteland Trader: What’s your poison?\nActive SCR: ${player.active.scr}`, components });
           saveState();
         });
 
@@ -532,25 +518,38 @@ client.on('messageCreate', async (message) => {
             new ButtonBuilder().setCustomId('refresh').setLabel('REFRESH').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
           )];
-      } else if (interaction.customId === 'refresh') {
-        const wait = player.lastRaid && (Date.now() - player.lastRaid < 60 * 60 * 1000) ? Math.ceil((60 * 60 * 1000 - (Date.now() - player.lastRaid)) / 60000) : 0;
-        content = `${player.name}’s Wasteland Ledger:\nHP: ${player.hp}, Attack: ${player.attack}, Armor: ${player.armor * 10}%, Energy: ${player.energy}/5${wait > 0 ? `, Cooldown: ${wait} min` : ''}\n` +
-                  `Active: ${player.active.scr} SCR${player.active.scrapMetal > 0 ? `, ${player.active.scrapMetal} Scrap Metal` : ''}${player.active.rustShard > 0 ? `, ${player.active.rustShard} Rust Shard${player.active.rustShard > 1 ? 's' : ''}` : ''}${player.active.glowDust > 0 ? `, ${player.active.glowDust} Glow Dust` : ''}\n` +
-                  `Bunker: ${player.bunker.scr} SCR${player.bunker.scrapMetal > 0 ? `, ${player.bunker.scrapMetal} Scrap Metal` : ''}${player.bunker.rustShard > 0 ? `, ${player.bunker.rustShard} Rust Shard${player.bunker.rustShard > 1 ? 's' : ''}` : ''}${player.bunker.glowDust > 0 ? `, ${player.bunker.glowDust} Glow Dust` : ''}\n` +
-                  `Equipped: ${player.equipped.weapon ? 'Rust Blade' : 'None'}, ${player.equipped.armor ? 'Glow Vest' : 'None'}\nScav Juice: ${player.inventory.scavJuice}\nSui Address: ${player.suiAddress}`;
-        components = [new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder().setCustomId('refresh').setLabel('REFRESH').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('back').setLabel('BACK').setStyle(ButtonStyle.Secondary)
-          )];
-      } else if (interaction.customId === 'back') {
-        content = `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`;
-        components = [mainMenu];
+
+        const walletCollector = menuMessage.createMessageComponentCollector({ filter, time: 120000 });
+        walletCollector.on('collect', async (walletInteraction) => {
+          await walletInteraction.deferUpdate();
+          if (walletInteraction.customId === 'refresh') {
+            const wait = player.lastRaid && (Date.now() - player.lastRaid < 60 * 60 * 1000) ? Math.ceil((60 * 60 * 1000 - (Date.now() - player.lastRaid)) / 60000) : 0;
+            content = `${player.name}’s Wasteland Ledger:\nHP: ${player.hp}, Attack: ${player.attack}, Armor: ${player.armor * 10}%, Energy: ${player.energy}/5${wait > 0 ? `, Cooldown: ${wait} min` : ''}\n` +
+                      `Active: ${player.active.scr} SCR${player.active.scrapMetal > 0 ? `, ${player.active.scrapMetal} Scrap Metal` : ''}${player.active.rustShard > 0 ? `, ${player.active.rustShard} Rust Shard${player.active.rustShard > 1 ? 's' : ''}` : ''}${player.active.glowDust > 0 ? `, ${player.active.glowDust} Glow Dust` : ''}\n` +
+                      `Bunker: ${player.bunker.scr} SCR${player.bunker.scrapMetal > 0 ? `, ${player.bunker.scrapMetal} Scrap Metal` : ''}${player.bunker.rustShard > 0 ? `, ${player.bunker.rustShard} Rust Shard${player.bunker.rustShard > 1 ? 's' : ''}` : ''}${player.bunker.glowDust > 0 ? `, ${player.bunker.glowDust} Glow Dust` : ''}\n` +
+                      `Equipped: ${player.equipped.weapon ? 'Rust Blade' : 'None'}, ${player.equipped.armor ? 'Glow Vest' : 'None'}\nScav Juice: ${player.inventory.scavJuice}\nSui Address: ${player.suiAddress}`;
+          } else if (walletInteraction.customId === 'back') {
+            walletCollector.stop('back');
+          }
+          await menuMessage.edit({ content: content || `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`, components: walletInteraction.customId === 'back' ? [mainMenu] : components });
+          saveState();
+        });
+
+        walletCollector.on('end', (collected, reason) => {
+          if (reason === 'time' || reason === 'back') {
+            menuMessage.edit({
+              content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
+              components: [mainMenu]
+            });
+            saveState();
+          }
+        });
+        return;
       } else if (interaction.customId === 'exit') {
         collector.stop('exit');
       }
 
-      await menuMessage.edit({ content, components });
+      await menuMessage.edit({ content: content || `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`, components });
       saveState();
     });
 
@@ -562,6 +561,11 @@ client.on('messageCreate', async (message) => {
         });
       }
     });
+  }
+
+  if (command === 'save') {
+    console.log('Current gameState:', JSON.stringify(gameState, null, 2));
+    message.reply('Game state logged to console—check Render logs or ask dev to copy it!');
   }
 
   if (command === 'terms') {
@@ -577,8 +581,7 @@ client.on('messageCreate', async (message) => {
 });
 
 function saveState() {
-  fs.writeFileSync('/data/state.json', JSON.stringify(gameState, null, 2));
-  console.log('Game state saved');
+  console.log('State updated in memory—use !save to log it!');
 }
 
 client.login(TOKEN);
