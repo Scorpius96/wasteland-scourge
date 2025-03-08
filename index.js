@@ -13,14 +13,20 @@ const client = new Client({
 const TOKEN = process.env.DISCORD_TOKEN;
 const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY;
 const ADMIN_ADDRESS = '0xdbfb5034a49be4deba3f01f1e8455148d4657f0bc4344ac5ad39c0c121f53671';
-const ADMIN_ID = 'Scorpius1996'; // Replace with your Discord ID
+const ADMIN_ID = 'YOUR_ADMIN_ID'; // Replace with your Discord ID
 
 const suiClient = new SuiClient({ url: getFullnodeUrl('testnet') });
 const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(ADMIN_PRIVATE_KEY, 'base64'));
 
 const STATE_FILE_PATH = path.join('/opt/render/project/src/gameState', 'gameState.json');
 
-let gameState = { players: {} };
+let gameState = { 
+  players: {}, 
+  leaderboards: { 
+    furthestFloor: [], 
+    mostRounds: [] 
+  } 
+};
 if (fs.existsSync(STATE_FILE_PATH)) {
   gameState = JSON.parse(fs.readFileSync(STATE_FILE_PATH));
   console.log(`Loaded gameState from ${STATE_FILE_PATH}`);
@@ -67,7 +73,7 @@ const craftableItems = {
   weapons: [
     { name: 'Slagfang Cleaver', attackBonus: 5, slagShards: 5, rustScraps: 2, scrFee: 1, rarity: 'Common' },
     { name: 'Rustspike Dagger', attackBonus: 5, rustScraps: 4, ashDust: 3, scrFee: 1, rarity: 'Common' },
-    { name: 'Ashbitten Axe', attackBonus: 5, ashDust: 5, slagShards: 2, scrFee: 1, rarity: 'Common' },
+    { name: 'Ashbitter Axe', attackBonus: 5, ashDust: 5, slagShards: 2, scrFee: 1, rarity: 'Common' },
     { name: 'Forgeborn Edge', attackBonus: 10, slagShards: 8, forgeIngots: 4, dustCores: 1, scrFee: 1, rarity: 'Uncommon' },
     { name: 'Dustreaver Scythe', attackBonus: 10, ashDust: 7, dustCores: 3, wraithThreads: 2, scrFee: 1, rarity: 'Uncommon' },
     { name: 'Ironclad Hammer', attackBonus: 10, rustScraps: 9, forgeIngots: 5, wraithThreads: 1, scrFee: 1, rarity: 'Uncommon' },
@@ -189,6 +195,18 @@ function useResource(player, resource, amount) {
   return false;
 }
 
+function updateLeaderboard(type, playerId, value) {
+  const leaderboard = gameState.leaderboards[type];
+  const entry = leaderboard.find(e => e.id === playerId);
+  if (entry) {
+    if (value > entry.value) entry.value = value;
+  } else {
+    leaderboard.push({ id: playerId, name: gameState.players[playerId].name, value });
+  }
+  gameState.leaderboards[type].sort((a, b) => b.value - a.value);
+  if (leaderboard.length > 10) leaderboard.length = 10; // Top 10 only
+}
+
 function saveState() {
   try {
     const stateDir = path.dirname(STATE_FILE_PATH);
@@ -231,7 +249,6 @@ client.on('ready', async () => {
       }
     }
     saveState();
-    console.log('Regen ticked at', new Date().toISOString());
   }, 60 * 1000);
 
   setInterval(() => {
@@ -264,13 +281,15 @@ client.on('messageCreate', async (message) => {
         attack: 10,
         armor: 0,
         energy: 5,
-        equipped: { weapon: false, armor: false },
-        active: { scr: 0, sparkcores: 5, slagShards: 0, rustScraps: 0, ashDust: 0, forgeIngots: 0, dustCores: 0, wraithThreads: 0, slagCrystals: 0, ashenRelics: 0, ironVeins: 0, titanEssence: 0 },
+        equipped: { weapon: null, armor: null },
+        active: { scr: 0, sparkcores: 0, slagShards: 0, rustScraps: 0, ashDust: 0, forgeIngots: 0, dustCores: 0, wraithThreads: 0, slagCrystals: 0, ashenRelics: 0, ironVeins: 0, titanEssence: 0 },
         bunker: { scr: 0, sparkcores: 0, slagShards: 0, rustScraps: 0, ashDust: 0, forgeIngots: 0, dustCores: 0, wraithThreads: 0, slagCrystals: 0, ashenRelics: 0, ironVeins: 0, titanEssence: 0 },
         lastRaid: 0,
         lastRegen: Date.now(),
         lastEnergyRegen: Date.now(),
-        inventory: { scavJuice: 0, reviveStim: 0, weapons: [], armor: [], misc: [] }
+        inventory: { scavJuice: 0, reviveStim: 0, weapons: [], armor: [], misc: [] },
+        furthestFloor: 0,
+        roundsSurvived: 0
       };
       player = gameState.players[message.author.id];
       await message.reply(`Registered as ${player.name}! Use !menu to start playing.`);
@@ -290,19 +309,21 @@ client.on('messageCreate', async (message) => {
 
     const mainMenu = new ActionRowBuilder()
       .addComponents(
-        new ButtonBuilder().setCustomId('scavenge').setLabel('SCAVENGE').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('bunker').setLabel('BUNKER').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('store').setLabel('STORE').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('stats').setLabel('STATS').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('inventory').setLabel('INVENTORY').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('scavenge').setLabel('Scavenge').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('bunker').setLabel('Bunker').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('store').setLabel('Store').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('stats').setLabel('Stats').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('crafting').setLabel('Crafting').setStyle(ButtonStyle.Primary)
       );
     const secondRow = new ActionRowBuilder()
       .addComponents(
-        new ButtonBuilder().setCustomId('exit').setLabel('EXIT').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('inventory').setLabel('Inventory').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('leaderboards').setLabel('Leaderboards').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('exit').setLabel('Exit').setStyle(ButtonStyle.Secondary)
       );
 
     const menuMessage = await message.reply({
-      content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
+      content: `**Wasteland Terminal - ${player.name}**\nChoose your action:`,
       components: [mainMenu, secondRow]
     });
 
@@ -325,7 +346,7 @@ client.on('messageCreate', async (message) => {
   }
 
   if (command === 'reset' && message.author.id === ADMIN_ID) {
-    gameState = { players: {} };
+    gameState = { players: {}, leaderboards: { furthestFloor: [], mostRounds: [] } };
     saveState();
     await message.reply('Game state has been reset to empty.');
   }
@@ -335,19 +356,20 @@ async function handleMenuInteraction(player, menuMessage, userId) {
   const filter = i => i.user.id === userId;
   const collector = menuMessage.createMessageComponentCollector({ filter, time: 300000 });
 
-  const mainMenu = () => new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder().setCustomId('scavenge').setLabel('SCAVENGE').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('bunker').setLabel('BUNKER').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('store').setLabel('STORE').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('stats').setLabel('STATS').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('inventory').setLabel('INVENTORY').setStyle(ButtonStyle.Secondary)
-    );
-
-  const secondRow = () => new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder().setCustomId('exit').setLabel('EXIT').setStyle(ButtonStyle.Secondary)
-    );
+  const mainMenu = () => [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('scavenge').setLabel('Scavenge').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('bunker').setLabel('Bunker').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('store').setLabel('Store').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('stats').setLabel('Stats').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('crafting').setLabel('Crafting').setStyle(ButtonStyle.Primary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('inventory').setLabel('Inventory').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('leaderboards').setLabel('Leaderboards').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('exit').setLabel('Exit').setStyle(ButtonStyle.Secondary)
+    )
+  ];
 
   collector.on('collect', async (interaction) => {
     try {
@@ -359,12 +381,12 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           const timeSinceDeath = now - player.lastRaid;
           if (timeSinceDeath < 24 * 60 * 60 * 1000) {
             const waitRemaining = Math.ceil((24 * 60 * 60 * 1000 - timeSinceDeath) / (60 * 60 * 1000));
-            await interaction.update({ content: `${player.name}, you’re dead! Wait ${waitRemaining} hours to respawn or use a Revive Stim.`, components: [mainMenu(), secondRow()] });
+            await interaction.update({ content: `${player.name}, you’re dead! Wait ${waitRemaining} hours to respawn or use a Revive Stim.`, components: mainMenu() });
             return;
           }
         }
         if (player.energy < 1) {
-          await interaction.update({ content: `${player.name}, out of energy! Regen 1/hour or buy with SUI. Energy: ${player.energy}/5`, components: [mainMenu(), secondRow()] });
+          await interaction.update({ content: `${player.name}, out of energy! Regen 1/hour or buy with SUI. Energy: ${player.energy}/5`, components: mainMenu() });
           return;
         }
         player.energy -= 1;
@@ -376,110 +398,75 @@ async function handleMenuInteraction(player, menuMessage, userId) {
         const bunkerMenu = new ActionRowBuilder()
           .addComponents(
             new ButtonBuilder().setCustomId('deposit').setLabel('Deposit Loot').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('craft').setLabel('Craft').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('sui_wallet').setLabel('Sui Wallet').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
           );
+        const activeMats = Object.entries(player.active).map(([key, value]) => `${key}: ${value}`).join(', ');
+        const bunkerMats = Object.entries(player.bunker).map(([key, value]) => `${key}: ${value}`).join(', ');
         await interaction.update({
-          content: `${player.name}, welcome to your Bunker.\nActive: ${player.active.scr.toFixed(2)} SCR, ${player.active.sparkcores} Sparkcores, ${player.active.slagShards} Slag Shards, ${player.active.rustScraps} Rust Scraps, ${player.active.ashDust} Ash Dust, ${player.active.forgeIngots} Forge Ingots, ${player.active.dustCores} Dust Cores, ${player.active.wraithThreads} Wraith Threads, ${player.active.slagCrystals} Slag Crystals, ${player.active.ashenRelics} Ashen Relics, ${player.active.ironVeins} Iron Veins, ${player.active.titanEssence} Titan Essence\nBunker: ${player.bunker.scr.toFixed(2)} SCR, ${player.bunker.sparkcores} Sparkcores, ${player.bunker.slagShards} Slag Shards, ${player.bunker.rustScraps} Rust Scraps, ${player.bunker.ashDust} Ash Dust, ${player.bunker.forgeIngots} Forge Ingots, ${player.bunker.dustCores} Dust Cores, ${player.bunker.wraithThreads} Wraith Threads, ${player.bunker.slagCrystals} Slag Crystals, ${player.bunker.ashenRelics} Ashen Relics, ${player.bunker.ironVeins} Iron Veins, ${player.bunker.titanEssence} Titan Essence`,
+          content: `**${player.name}'s Bunker**\n**Active Loot**: ${activeMats}\n**Stored Loot**: ${bunkerMats}`,
           components: [bunkerMenu]
         });
       } else if (interaction.customId === 'deposit') {
-        player.bunker.scr += player.active.scr;
-        player.bunker.sparkcores += player.active.sparkcores || 0;
-        player.bunker.slagShards += player.active.slagShards || 0;
-        player.bunker.rustScraps += player.active.rustScraps || 0;
-        player.bunker.ashDust += player.active.ashDust || 0;
-        player.bunker.forgeIngots += player.active.forgeIngots || 0;
-        player.bunker.dustCores += player.active.dustCores || 0;
-        player.bunker.wraithThreads += player.active.wraithThreads || 0;
-        player.bunker.slagCrystals += player.active.slagCrystals || 0;
-        player.bunker.ashenRelics += player.active.ashenRelics || 0;
-        player.bunker.ironVeins += player.active.ironVeins || 0;
-        player.bunker.titanEssence += player.active.titanEssence || 0;
-        player.active.scr = 0;
-        player.active.sparkcores = 0;
-        player.active.slagShards = 0;
-        player.active.rustScraps = 0;
-        player.active.ashDust = 0;
-        player.active.forgeIngots = 0;
-        player.active.dustCores = 0;
-        player.active.wraithThreads = 0;
-        player.active.slagCrystals = 0;
-        player.active.ashenRelics = 0;
-        player.active.ironVeins = 0;
-        player.active.titanEssence = 0;
+        Object.keys(player.active).forEach(key => {
+          player.bunker[key] = (player.bunker[key] || 0) + player.active[key];
+          player.active[key] = 0;
+        });
+        const bunkerMats = Object.entries(player.bunker).map(([key, value]) => `${key}: ${value}`).join(', ');
         await interaction.update({
-          content: `${player.name}, loot deposited.\nBunker: ${player.bunker.scr.toFixed(2)} SCR, ${player.bunker.sparkcores} Sparkcores, ${player.bunker.slagShards} Slag Shards, ${player.bunker.rustScraps} Rust Scraps, ${player.bunker.ashDust} Ash Dust, ${player.bunker.forgeIngots} Forge Ingots, ${player.bunker.dustCores} Dust Cores, ${player.bunker.wraithThreads} Wraith Threads, ${player.bunker.slagCrystals} Slag Crystals, ${player.bunker.ashenRelics} Ashen Relics, ${player.bunker.ironVeins} Iron Veins, ${player.bunker.titanEssence} Titan Essence`,
-          components: [new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success)
-          )]
+          content: `**${player.name}'s Bunker**\nLoot deposited!\n**Stored Loot**: ${bunkerMats}`,
+          components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success))]
         });
       } else if (interaction.customId === 'sui_wallet') {
         try {
           const suiBalance = await suiClient.getBalance({ owner: player.suiAddress });
           await interaction.update({
-            content: `${player.name}, your Sui Wallet:\nSUI Balance: ${(suiBalance.totalBalance / 1e9).toFixed(2)} SUI`,
-            components: [new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success)
-            )]
+            content: `**${player.name}'s Sui Wallet**\nSUI Balance: ${(suiBalance.totalBalance / 1e9).toFixed(2)} SUI`,
+            components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success))]
           });
         } catch (error) {
           console.error('Error fetching wallet balance:', error);
           await interaction.update({
-            content: `${player.name}, error fetching wallet balance: ${error.message}`,
-            components: [new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success)
-            )]
+            content: `**${player.name}'s Sui Wallet**\nError fetching balance: ${error.message}`,
+            components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('bunker').setLabel('Back to Bunker').setStyle(ButtonStyle.Success))]
           });
         }
-      } else if (interaction.customId === 'craft') {
+      } else if (interaction.customId === 'crafting') {
         const craftMenu1 = new ActionRowBuilder()
           .addComponents(
-            new ButtonBuilder().setCustomId('craft_slagfang_cleaver').setLabel('Slagfang Cleaver (5 SS, 2 RS, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_rustspike_dagger').setLabel('Rustspike Dagger (4 RS, 3 AD, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_ashbitter_axe').setLabel('Ashbitter Axe (5 AD, 2 SS, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_ashwoven_shroud').setLabel('Ashwoven Shroud (4 AD, 3 RS, 1 SCR)').setStyle(ButtonStyle.Primary)
+            new ButtonBuilder().setCustomId('craft_slagfang_cleaver').setLabel('Slagfang Cleaver').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_rustspike_dagger').setLabel('Rustspike Dagger').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_ashbitter_axe').setLabel('Ashbitter Axe').setStyle(ButtonStyle.Primary)
           );
         const craftMenu2 = new ActionRowBuilder()
           .addComponents(
-            new ButtonBuilder().setCustomId('craft_rustpatch_vest').setLabel('Rustpatch Vest (5 RS, 2 SS, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_slaghide_cloak').setLabel('Slaghide Cloak (4 SS, 3 AD, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_forgeborn_edge').setLabel('Forgeborn Edge (8 SS, 4 FI, 1 DC, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_dustreaver_scythe').setLabel('Dustreaver Scythe (7 AD, 3 DC, 2 WT, 1 SCR)').setStyle(ButtonStyle.Primary)
+            new ButtonBuilder().setCustomId('craft_ashwoven_shroud').setLabel('Ashwoven Shroud').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_rustpatch_vest').setLabel('Rustpatch Vest').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_slaghide_cloak').setLabel('Slaghide Cloak').setStyle(ButtonStyle.Primary)
           );
         const craftMenu3 = new ActionRowBuilder()
           .addComponents(
-            new ButtonBuilder().setCustomId('craft_ironclad_hammer').setLabel('Ironclad Hammer (9 RS, 5 FI, 1 WT, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_ironveil_plate').setLabel('Ironveil Plate (8 RS, 4 FI, 1 DC, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_dustforged_carapace').setLabel('Dustforged Carapace (9 AD, 3 DC, 2 WT, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_forgeweave_mantle').setLabel('Forgeweave Mantle (7 SS, 5 FI, 1 WT, 1 SCR)').setStyle(ButtonStyle.Primary)
+            new ButtonBuilder().setCustomId('craft_forgeborn_edge').setLabel('Forgeborn Edge').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_dustreaver_scythe').setLabel('Dustreaver Scythe').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_ironclad_hammer').setLabel('Ironclad Hammer').setStyle(ButtonStyle.Primary)
           );
         const craftMenu4 = new ActionRowBuilder()
           .addComponents(
-            new ButtonBuilder().setCustomId('craft_slaghowl_lance').setLabel('Slaghowl Lance (10 SS, 6 FI, 3 SC, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_ashveil_flail').setLabel('Ashveil Flail (12 AD, 5 DC, 2 AR, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_wraithspike_trident').setLabel('Wraithspike Trident (11 RS, 7 WT, 2 IV, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_slagthorn_guard').setLabel('Slagthorn Guard (11 SS, 6 FI, 2 SC, 1 SCR)').setStyle(ButtonStyle.Primary)
+            new ButtonBuilder().setCustomId('craft_ironveil_plate').setLabel('Ironveil Plate').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_dustforged_carapace').setLabel('Dustforged Carapace').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_forgeweave_mantle').setLabel('Forgeweave Mantle').setStyle(ButtonStyle.Primary)
           );
         const craftMenu5 = new ActionRowBuilder()
           .addComponents(
-            new ButtonBuilder().setCustomId('craft_ashspire_shell').setLabel('Ashspire Shell (10 AD, 5 DC, 3 AR, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_wraithsteel_harness').setLabel('Wraithsteel Harness (12 RS, 7 WT, 2 IV, 1 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_slagborne_reaver').setLabel('Slagborne Reaver (15 SS, 10 FI, 5 SC, 1 TE+Core, 2 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_ashen_sovereign_blade').setLabel('Ashen Sovereign Blade (15 AD, 10 DC, 5 AR, 1 TE+Crest, 2 SCR)').setStyle(ButtonStyle.Primary)
-          );
-        const craftMenu6 = new ActionRowBuilder()
-          .addComponents(
-            new ButtonBuilder().setCustomId('craft_wraithforge_glaive').setLabel('Wraithforge Glaive (15 RS, 10 WT, 5 IV, 1 TE+Ember, 2 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_ashcrown_mantle').setLabel('Ashcrown Mantle (15 AD, 10 DC, 5 AR, 1 TE+Shard, 2 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_ironveil_regalia').setLabel('Ironveil Regalia (15 RS, 10 WT, 5 IV, 1 TE+Crown, 2 SCR)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('craft_slagforged_aegis').setLabel('Slagforged Aegis (15 SS, 10 FI, 5 SC, 1 TE+Core, 2 SCR)').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_slaghowl_lance').setLabel('Slaghowl Lance').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_ashveil_flail').setLabel('Ashveil Flail').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('craft_wraithspike_trident').setLabel('Wraithspike Trident').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
           );
+        const craftText = `**Crafting Station - ${player.name}**\n**Stored Materials**: ${Object.entries(player.bunker).map(([k, v]) => `${k}: ${v}`).join(', ')}\n\nSelect an item to craft:`;
         await interaction.update({
-          content: `${player.name}, crafting options:\nBunker: ${player.bunker.scr.toFixed(2)} SCR, ${player.bunker.slagShards} SS, ${player.bunker.rustScraps} RS, ${player.bunker.ashDust} AD, ${player.bunker.forgeIngots} FI, ${player.bunker.dustCores} DC, ${player.bunker.wraithThreads} WT, ${player.bunker.slagCrystals} SC, ${player.bunker.ashenRelics} AR, ${player.bunker.ironVeins} IV, ${player.bunker.titanEssence} TE`,
-          components: [craftMenu1, craftMenu2, craftMenu3, craftMenu4, craftMenu5, craftMenu6]
+          content: craftText,
+          components: [craftMenu1, craftMenu2, craftMenu3, craftMenu4, craftMenu5]
         });
       } else if (interaction.customId.startsWith('craft_')) {
         const itemName = interaction.customId.replace('craft_', '').replace(/_/g, ' ');
@@ -487,7 +474,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
         const armor = craftableItems.armor.find(i => i.name.toLowerCase() === itemName);
         const item = weapon || armor;
         if (!item) {
-          await interaction.update({ content: `${player.name}, invalid item!`, components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('craft').setLabel('Back to Craft').setStyle(ButtonStyle.Primary))] });
+          await interaction.update({ content: `${player.name}, invalid item!`, components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('crafting').setLabel('Back to Crafting').setStyle(ButtonStyle.Primary))] });
           return;
         }
         const hasMats = (!item.slagShards || player.bunker.slagShards >= item.slagShards) &&
@@ -520,14 +507,11 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           }
           const nftDigest = item.rarity === 'Legendary' ? await mintNFT(player, item.name, item.rarity) : null;
           const itemData = { name: item.name, ...(item.attackBonus ? { attackBonus: item.attackBonus } : { armorBonus: item.armorBonus }), nftId: nftDigest, bonus: item.bonus };
-          if (item.attackBonus) {
-            player.inventory.weapons.push(itemData);
-          } else {
-            player.inventory.armor.push(itemData);
-          }
+          if (item.attackBonus) player.inventory.weapons.push(itemData);
+          else player.inventory.armor.push(itemData);
           await interaction.update({
-            content: `${player.name}, crafted ${item.name}${item.bonus ? ` (${item.bonus.desc})` : ''}${nftDigest ? `! Minted as NFT: ${nftDigest}` : ''}!`,
-            components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('craft').setLabel('Back to Craft').setStyle(ButtonStyle.Primary))]
+            content: `**Crafting Success - ${player.name}**\nCrafted: ${item.name}${item.bonus ? ` (${item.bonus.desc})` : ''}${nftDigest ? `\nMinted as NFT: ${nftDigest}` : ''}`,
+            components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('crafting').setLabel('Back to Crafting').setStyle(ButtonStyle.Primary))]
           });
         } else {
           const neededMats = [
@@ -545,28 +529,28 @@ async function handleMenuInteraction(player, menuMessage, userId) {
             item.legendaryItem ? item.legendaryItem : ''
           ].filter(Boolean).join(', ');
           await interaction.update({
-            content: `${player.name}, not enough materials! Need: ${neededMats}`,
-            components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('craft').setLabel('Back to Craft').setStyle(ButtonStyle.Primary))]
+            content: `**Crafting Failed - ${player.name}**\nNot enough materials for ${item.name}!\nNeeded: ${neededMats}`,
+            components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('crafting').setLabel('Back to Crafting').setStyle(ButtonStyle.Primary))]
           });
         }
       } else if (interaction.customId === 'store') {
-        const storeMenu1 = new ActionRowBuilder()
+        const storeMenu = new ActionRowBuilder()
           .addComponents(
             new ButtonBuilder().setCustomId('buy_energy').setLabel('Energy Refill (0.01 SUI)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('buy_common_pack').setLabel('Common Pack (0.005 SUI)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('buy_uncommon_pack').setLabel('Uncommon Pack (0.005 SUI)').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('buy_epic_pack').setLabel('Epic Pack (0.005 SUI)').setStyle(ButtonStyle.Primary)
+            new ButtonBuilder().setCustomId('buy_common_pack').setLabel('Common Materials (0.005 SUI)').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('buy_uncommon_pack').setLabel('Uncommon Materials (0.01 SUI)').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('buy_epic_pack').setLabel('Epic Materials (0.02 SUI)').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('buy_legendary_pack').setLabel('Legendary Materials (0.05 SUI)').setStyle(ButtonStyle.Primary)
           );
-        const storeMenu2 = new ActionRowBuilder()
+        const secondRow = new ActionRowBuilder()
           .addComponents(
-            new ButtonBuilder().setCustomId('buy_legendary_pack').setLabel('Legendary Pack (0.005 SUI)').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('buy_scav_juice').setLabel('Scav Juice (5 SCR)').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('buy_revive_stim').setLabel('Revive Stim (10 SCR)').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
           );
         await interaction.update({
-          content: `${player.name}, welcome to the Store.\nBunker SCR: ${player.bunker.scr.toFixed(2)}`,
-          components: [storeMenu1, storeMenu2]
+          content: `**Store - ${player.name}**\nBunker SCR: ${player.bunker.scr.toFixed(2)}\nChoose an item to purchase:`,
+          components: [storeMenu, secondRow]
         });
       } else if (interaction.customId === 'buy_energy') {
         const suiCost = 0.01 * 1e9; // 0.01 SUI in MIST
@@ -583,18 +567,19 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           const result = await suiClient.signAndExecuteTransaction({ transaction: tx, signer: keypair });
           player.energy = 5;
           await interaction.update({
-            content: `${player.name}, bought an Energy Refill for 0.01 SUI! Energy: ${player.energy}/5\nTx: ${result.digest}`,
+            content: `**Purchase - ${player.name}**\nBought Energy Refill for 0.01 SUI!\nEnergy: ${player.energy}/5\nTx: ${result.digest}`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary))]
           });
         } catch (error) {
           await interaction.update({
-            content: `${player.name}, failed to buy Energy Refill: ${error.message}. Need 0.01 SUI.`,
+            content: `**Purchase Failed - ${player.name}**\nFailed to buy Energy Refill: ${error.message}. Need 0.01 SUI.`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary))]
           });
         }
       } else if (interaction.customId.startsWith('buy_') && interaction.customId.includes('_pack')) {
         const packType = interaction.customId.split('_')[1];
-        const suiCost = 0.005 * 1e9; // 0.005 SUI in MIST
+        const suiCosts = { common: 0.005 * 1e9, uncommon: 0.01 * 1e9, epic: 0.02 * 1e9, legendary: 0.05 * 1e9 };
+        const suiCost = suiCosts[packType];
         try {
           const suiCoins = await suiClient.getCoins({ owner: player.suiAddress });
           if (!suiCoins.data.length || suiCoins.data[0].balance < suiCost) throw new Error('Insufficient SUI');
@@ -607,24 +592,16 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           tx.setGasPayment([{ objectId: adminSuiCoins.data[0].coinObjectId, version: adminSuiCoins.data[0].version, digest: adminSuiCoins.data[0].digest }]);
           const result = await suiClient.signAndExecuteTransaction({ transaction: tx, signer: keypair });
           const loot = rollForMaterialPack(packType);
-          player.active.slagShards += loot.slagShards || 0;
-          player.active.rustScraps += loot.rustScraps || 0;
-          player.active.ashDust += loot.ashDust || 0;
-          player.active.forgeIngots += loot.forgeIngots || 0;
-          player.active.dustCores += loot.dustCores || 0;
-          player.active.wraithThreads += loot.wraithThreads || 0;
-          player.active.slagCrystals += loot.slagCrystals || 0;
-          player.active.ashenRelics += loot.ashenRelics || 0;
-          player.active.ironVeins += loot.ironVeins || 0;
-          player.active.titanEssence += loot.titanEssence || 0;
+          Object.keys(loot).forEach(key => player.active[key] = (player.active[key] || 0) + (loot[key] || 0));
           if (loot.legendaryItem) player.inventory.misc.push({ name: loot.legendaryItem });
+          const lootText = Object.entries(loot).filter(([_, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ');
           await interaction.update({
-            content: `${player.name}, bought ${packType} pack for 0.005 SUI! Loot: ${loot.slagShards || 0} SS, ${loot.rustScraps || 0} RS, ${loot.ashDust || 0} AD, ${loot.forgeIngots || 0} FI, ${loot.dustCores || 0} DC, ${loot.wraithThreads || 0} WT, ${loot.slagCrystals || 0} SC, ${loot.ashenRelics || 0} AR, ${loot.ironVeins || 0} IV, ${loot.titanEssence || 0} TE${loot.legendaryItem ? `, ${loot.legendaryItem}` : ''}\nTx: ${result.digest}`,
+            content: `**Purchase - ${player.name}**\nBought ${packType.charAt(0).toUpperCase() + packType.slice(1)} Materials for ${(suiCost / 1e9).toFixed(3)} SUI!\nLoot: ${lootText}\nTx: ${result.digest}`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary))]
           });
         } catch (error) {
           await interaction.update({
-            content: `${player.name}, failed to buy ${packType} pack: ${error.message}. Need 0.005 SUI.`,
+            content: `**Purchase Failed - ${player.name}**\nFailed to buy ${packType} materials: ${error.message}. Need ${(suiCost / 1e9).toFixed(3)} SUI.`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary))]
           });
         }
@@ -633,12 +610,12 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           player.bunker.scr -= 5;
           player.inventory.scavJuice += 1;
           await interaction.update({
-            content: `${player.name}, bought a Scav Juice! Inventory: ${player.inventory.scavJuice} Scav Juice`,
+            content: `**Purchase - ${player.name}**\nBought Scav Juice for 5 SCR!\nInventory: ${player.inventory.scavJuice} Scav Juice`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary))]
           });
         } else {
           await interaction.update({
-            content: `${player.name}, not enough SCR! Need 5, have ${player.bunker.scr.toFixed(2)}.`,
+            content: `**Purchase Failed - ${player.name}**\nNot enough SCR! Need 5, have ${player.bunker.scr.toFixed(2)}.`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary))]
           });
         }
@@ -647,12 +624,12 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           player.bunker.scr -= 10;
           player.inventory.reviveStim += 1;
           await interaction.update({
-            content: `${player.name}, bought a Revive Stim! Inventory: ${player.inventory.reviveStim} Revive Stims`,
+            content: `**Purchase - ${player.name}**\nBought Revive Stim for 10 SCR!\nInventory: ${player.inventory.reviveStim} Revive Stims`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary))]
           });
         } else {
           await interaction.update({
-            content: `${player.name}, not enough SCR! Need 10, have ${player.bunker.scr.toFixed(2)}.`,
+            content: `**Purchase Failed - ${player.name}**\nNot enough SCR! Need 10, have ${player.bunker.scr.toFixed(2)}.`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('store').setLabel('Back to Store').setStyle(ButtonStyle.Primary))]
           });
         }
@@ -660,7 +637,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
         const maxHpBonus = player.equipped.weapon?.bonus?.type === 'maxHp' ? player.equipped.weapon.bonus.value : 0;
         const damageResist = player.equipped.armor?.bonus?.type === 'damageResist' ? player.equipped.armor.bonus.value : 0;
         await interaction.update({
-          content: `${player.name}, your stats:\nHP: ${player.hp}/${50 + maxHpBonus}\nAttack: ${player.attack} (+${Math.floor(player.attack / 5)} to D20${player.equipped.weapon?.bonus?.type === 'critChance' ? `, ${player.equipped.weapon.bonus.desc}` : ''})\nArmor: ${player.armor} (reduces damage by ${Math.floor(player.armor * 5 + damageResist * 100)}%${player.equipped.armor?.bonus && player.equipped.armor.bonus.type !== 'damageResist' ? `, ${player.equipped.armor.bonus.desc}` : ''})\nEnergy: ${player.energy}/5`,
+          content: `**Stats - ${player.name}**\nHP: ${player.hp}/${50 + maxHpBonus}\nAttack: ${player.attack} (+${Math.floor(player.attack / 5)} to D20${player.equipped.weapon?.bonus?.type === 'critChance' ? `, ${player.equipped.weapon.bonus.desc}` : ''})\nArmor: ${player.armor} (${Math.floor(player.armor * 5 + damageResist * 100)}% damage reduction${player.equipped.armor?.bonus && player.equipped.armor.bonus.type !== 'damageResist' ? `, ${player.equipped.armor.bonus.desc}` : ''})\nEnergy: ${player.energy}/5`,
           components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary))]
         });
       } else if (interaction.customId === 'inventory') {
@@ -673,13 +650,13 @@ async function handleMenuInteraction(player, menuMessage, userId) {
             new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary)
           );
         await interaction.update({
-          content: `${player.name}, your inventory:\nSelect a category to view items.`,
+          content: `**Inventory - ${player.name}**\nSelect a category:`,
           components: [invMenu]
         });
       } else if (interaction.customId === 'inv_armor') {
         const armorItems = player.inventory.armor.length ? player.inventory.armor.map((a, i) => `${i + 1}. ${a.name} (+${a.armorBonus} Armor${a.bonus ? `, ${a.bonus.desc}` : ''})${a.nftId ? ` [NFT: ${a.nftId}]` : ''}`).join('\n') : 'None';
         await interaction.update({
-          content: `${player.name}, your armor:\n${armorItems}`,
+          content: `**Armor - ${player.name}**\n${armorItems}`,
           components: [new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('equip').setLabel('Equip Item').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
@@ -688,7 +665,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
       } else if (interaction.customId === 'inv_weapons') {
         const weapons = player.inventory.weapons.length ? player.inventory.weapons.map((w, i) => `${i + 1}. ${w.name} (+${w.attackBonus} Attack${w.bonus ? `, ${w.bonus.desc}` : ''})${w.nftId ? ` [NFT: ${w.nftId}]` : ''}`).join('\n') : 'None';
         await interaction.update({
-          content: `${player.name}, your weapons:\n${weapons}`,
+          content: `**Weapons - ${player.name}**\n${weapons}`,
           components: [new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('equip').setLabel('Equip Item').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
@@ -697,7 +674,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
       } else if (interaction.customId === 'inv_healing') {
         const healingItems = `Scav Juice: ${player.inventory.scavJuice || 0}\nRevive Stims: ${player.inventory.reviveStim || 0}`;
         await interaction.update({
-          content: `${player.name}, your healing items:\n${healingItems}`,
+          content: `**Healing Items - ${player.name}**\n${healingItems}`,
           components: [new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('use_revive_stim').setLabel('Use Revive Stim').setStyle(ButtonStyle.Success).setDisabled(!(player.hp <= 0 && player.inventory.reviveStim > 0)),
             new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary)
@@ -706,7 +683,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
       } else if (interaction.customId === 'inv_misc') {
         const miscItems = player.inventory.misc.length ? player.inventory.misc.map((m, i) => `${i + 1}. ${m.name}`).join('\n') : 'None';
         await interaction.update({
-          content: `${player.name}, your misc items:\n${miscItems}`,
+          content: `**Misc Items - ${player.name}**\n${miscItems}`,
           components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary))]
         });
       } else if (interaction.customId === 'use_revive_stim') {
@@ -715,12 +692,12 @@ async function handleMenuInteraction(player, menuMessage, userId) {
           player.inventory.reviveStim -= 1;
           player.lastRegen = Date.now();
           await interaction.update({
-            content: `${player.name}, used a Revive Stim! HP restored to 10. Inventory: ${player.inventory.reviveStim} Revive Stims remaining.`,
+            content: `**${player.name}**\nUsed a Revive Stim! HP restored to 10.\nRevive Stims: ${player.inventory.reviveStim}`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary))]
           });
         } else {
           await interaction.update({
-            content: `${player.name}, you can only use a Revive Stim when dead and if you have one!`,
+            content: `**${player.name}**\nYou can only use a Revive Stim when dead and if you have one!`,
             components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary))]
           });
         }
@@ -757,7 +734,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
         }
 
         await interaction.update({
-          content: `${player.name}, select an item to equip:`,
+          content: `**Equip Item - ${player.name}**\nSelect an item to equip:`,
           components: rows
         });
       } else if (interaction.customId.startsWith('equip_weapon_')) {
@@ -766,7 +743,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
         player.equipped.weapon = weapon;
         player.attack = 10 + weapon.attackBonus;
         await interaction.update({
-          content: `${player.name}, equipped ${weapon.name}${weapon.bonus ? ` (${weapon.bonus.desc})` : ''}! Attack: ${player.attack} (+${Math.floor(player.attack / 5)} to D20)`,
+          content: `**${player.name}**\nEquipped ${weapon.name}${weapon.bonus ? ` (${weapon.bonus.desc})` : ''}!\nAttack: ${player.attack} (+${Math.floor(player.attack / 5)} to D20)`,
           components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary))]
         });
       } else if (interaction.customId.startsWith('equip_armor_')) {
@@ -775,22 +752,33 @@ async function handleMenuInteraction(player, menuMessage, userId) {
         player.equipped.armor = armor;
         player.armor = armor.armorBonus;
         await interaction.update({
-          content: `${player.name}, equipped ${armor.name}${armor.bonus ? ` (${armor.bonus.desc})` : ''}! Armor: ${player.armor} (reduces damage by ${player.armor * 5}%)`,
+          content: `**${player.name}**\nEquipped ${armor.name}${armor.bonus ? ` (${armor.bonus.desc})` : ''}!\nArmor: ${player.armor} (${player.armor * 5}% damage reduction)`,
           components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('inventory').setLabel('Back to Inventory').setStyle(ButtonStyle.Secondary))]
+        });
+      } else if (interaction.customId === 'leaderboards') {
+        const furthestFloorText = gameState.leaderboards.furthestFloor.length 
+          ? gameState.leaderboards.furthestFloor.map((e, i) => `${i + 1}. ${e.name}: Floor ${e.value}`).join('\n') 
+          : 'No records yet.';
+        const mostRoundsText = gameState.leaderboards.mostRounds.length 
+          ? gameState.leaderboards.mostRounds.map((e, i) => `${i + 1}. ${e.name}: ${e.value} Rounds`).join('\n') 
+          : 'No records yet.';
+        await interaction.update({
+          content: `**Leaderboards - ${player.name}**\n**Furthest Floor Reached**\n${furthestFloorText}\n\n**Most Rounds Survived**\n${mostRoundsText}`,
+          components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('back').setLabel('Back').setStyle(ButtonStyle.Secondary))]
         });
       } else if (interaction.customId === 'back') {
         await interaction.update({
-          content: `${player.name}, welcome to the Wasteland Terminal.\nChoose your action:`,
-          components: [mainMenu(), secondRow()]
+          content: `**Wasteland Terminal - ${player.name}**\nChoose your action:`,
+          components: mainMenu()
         });
       } else if (interaction.customId === 'exit') {
-        await interaction.update({ content: `${player.name}, session ended. Type !menu to return.`, components: [] });
+        await interaction.update({ content: `**${player.name}**\nSession ended. Type !menu to return.`, components: [] });
         collector.stop('exit');
       }
       saveState();
     } catch (error) {
       console.error(`Menu error for ${player.name}:`, error.stack);
-      await interaction.update({ content: `${player.name}, an interaction failed! Please use !menu to start again.`, components: [] }).catch(() => {});
+      await interaction.update({ content: `**${player.name}**\nInteraction failed! Use !menu to restart.`, components: [] }).catch(() => {});
       collector.stop('error');
     }
   });
@@ -799,7 +787,7 @@ async function handleMenuInteraction(player, menuMessage, userId) {
     console.log(`Main collector ended for ${player.name}. Reason: ${reason}`);
     if (reason === 'time' || reason === 'exit') {
       menuMessage.edit({
-        content: `${player.name}, session ended. Type !menu to return.`,
+        content: `**${player.name}**\nSession ended. Type !menu to return.`,
         components: []
       }).catch(err => console.error('Failed to edit on end:', err));
       saveState();
@@ -813,6 +801,7 @@ async function handleEndlessDungeon(player, initialInteraction, menuMessage, dun
   let enemy = getScaledEnemy(dungeon.tiers, floor);
   let enemyHp = enemy.hp;
   let hasExplored = false;
+  let rounds = 0;
   const filter = i => i.user.id === userId;
 
   const combatMenu = () => new ActionRowBuilder()
@@ -824,7 +813,7 @@ async function handleEndlessDungeon(player, initialInteraction, menuMessage, dun
     );
 
   await initialInteraction.update({
-    content: `${player.name}, you’ve entered ${dungeon.name} - Floor ${floor}\n${dungeon.desc}\n\n${enemy.flavor}\nEnemy: ${enemy.name} (${enemyHp}/${enemy.hp} HP)\nYou: ${player.hp} HP, ${player.energy}/5 Energy`,
+    content: `**${dungeon.name} - Floor ${floor}**\n${player.name}, you enter: ${dungeon.desc}\n\n${enemy.flavor}\nEnemy: ${enemy.name} (${enemyHp}/${enemy.hp} HP)\nYou: ${player.hp} HP, ${player.energy}/5 Energy`,
     components: [combatMenu()]
   });
 
@@ -842,28 +831,33 @@ async function handleEndlessDungeon(player, initialInteraction, menuMessage, dun
           const damageResist = player.equipped.armor?.bonus?.type === 'damageResist' ? player.equipped.armor.bonus.value : 0;
           enemyDamage = Math.max(0, Math.floor(enemyDamage * (1 - player.armor * 0.05 - damageResist)));
           player.hp -= enemyDamage;
+        } else {
+          rounds++;
         }
         if (player.hp <= 0) {
           player.lastRaid = Date.now();
+          updateLeaderboard('furthestFloor', userId, floor);
+          updateLeaderboard('mostRounds', userId, rounds);
           await interaction.update({
-            content: `${player.name}, you dealt ${playerDamage} damage to ${enemy.name} (${enemyHp}/${enemy.hp} HP), but it hit back for ${enemyDamage}! You’ve been defeated on Floor ${floor}. Respawn in 24 hours or use a Revive Stim.\nLoot: ${loot.scr.toFixed(2)} SCR`,
+            content: `**Defeat - ${player.name}**\nYou dealt ${playerDamage} damage, but ${enemy.name} hit for ${enemyDamage}!\nDied on Floor ${floor}, ${rounds} rounds survived.\nLoot: ${loot.scr.toFixed(2)} SCR\nRespawn in 24h or use a Revive Stim.`,
             components: []
           });
-          Object.keys(loot).forEach(key => player.active[key] += loot[key]);
+          Object.keys(loot).forEach(key => player.active[key] = (player.active[key] || 0) + loot[key]);
           dungeonCollector.stop('death');
         } else if (enemyHp <= 0) {
           const enemyLoot = rollForMaterials(floor, enemy.name);
           const scrReward = Math.min(enemy.scrMax, enemy.scrMin + Math.random() * (enemy.scrMax - enemy.scrMin));
           loot.scr += scrReward;
-          Object.keys(enemyLoot).forEach(key => loot[key] += enemyLoot[key]);
+          Object.keys(enemyLoot).forEach(key => loot[key] = (loot[key] || 0) + enemyLoot[key]);
           if (enemyLoot.legendaryItem) player.inventory.misc.push({ name: enemyLoot.legendaryItem });
+          const lootText = Object.entries(loot).filter(([_, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ');
           await interaction.update({
-            content: `${player.name}, you dealt ${playerDamage} damage and defeated ${enemy.name}! It hit for ${enemyDamage}. You’re at ${player.hp} HP.\nLoot so far: ${loot.scr.toFixed(2)} SCR, ${loot.slagShards} SS, ${loot.rustScraps} RS, ${loot.ashDust} AD, ${loot.forgeIngots} FI, ${loot.dustCores} DC, ${loot.wraithThreads} WT, ${loot.slagCrystals} SC, ${loot.ashenRelics} AR, ${loot.ironVeins} IV, ${loot.titanEssence} TE${enemyLoot.legendaryItem ? `, ${enemyLoot.legendaryItem}` : ''}`,
+            content: `**Victory - ${player.name}**\nDealt ${playerDamage} damage, defeated ${enemy.name}! It hit for ${enemyDamage}.\nHP: ${player.hp}\nLoot: ${lootText}`,
             components: [combatMenu()]
           });
         } else {
           await interaction.update({
-            content: `${player.name}, you dealt ${playerDamage} damage to ${enemy.name} (${enemyHp}/${enemy.hp} HP). It hit back for ${enemyDamage}. You’re at ${player.hp} HP.\nLoot so far: ${loot.scr.toFixed(2)} SCR, ${loot.slagShards} SS, ${loot.rustScraps} RS, ${loot.ashDust} AD, ${loot.forgeIngots} FI, ${loot.dustCores} DC, ${loot.wraithThreads} WT, ${loot.slagCrystals} SC, ${loot.ashenRelics} AR, ${loot.ironVeins} IV, ${loot.titanEssence} TE`,
+            content: `**${dungeon.name} - Floor ${floor}**\n${player.name}, you dealt ${playerDamage} damage to ${enemy.name} (${enemyHp}/${enemy.hp} HP).\nIt hit for ${enemyDamage}. HP: ${player.hp}\nLoot: ${loot.scr.toFixed(2)} SCR`,
             components: [combatMenu()]
           });
         }
@@ -878,15 +872,17 @@ async function handleEndlessDungeon(player, initialInteraction, menuMessage, dun
           player.hp -= reducedDamage;
           if (player.hp <= 0) {
             player.lastRaid = Date.now();
+            updateLeaderboard('furthestFloor', userId, floor);
+            updateLeaderboard('mostRounds', userId, rounds);
             await interaction.update({
-              content: `${player.name}, you healed 20 HP but ${enemy.name} hit for ${reducedDamage}! You’ve been defeated on Floor ${floor}. Respawn in 24 hours or use a Revive Stim.\nLoot: ${loot.scr.toFixed(2)} SCR`,
+              content: `**Defeat - ${player.name}**\nHealed 20 HP, but ${enemy.name} hit for ${reducedDamage}!\nDied on Floor ${floor}, ${rounds} rounds survived.\nLoot: ${loot.scr.toFixed(2)} SCR\nRespawn in 24h or use a Revive Stim.`,
               components: []
             });
-            Object.keys(loot).forEach(key => player.active[key] += loot[key]);
+            Object.keys(loot).forEach(key => player.active[key] = (player.active[key] || 0) + loot[key]);
             dungeonCollector.stop('death');
           } else {
             await interaction.update({
-              content: `${player.name}, you healed 20 HP to ${player.hp} HP. ${enemy.name} hit for ${reducedDamage}. (${enemyHp}/${enemy.hp} HP)\nLoot so far: ${loot.scr.toFixed(2)} SCR`,
+              content: `**${dungeon.name} - Floor ${floor}**\n${player.name}, healed 20 HP to ${player.hp}.\n${enemy.name} hit for ${reducedDamage} (${enemyHp}/${enemy.hp} HP).\nLoot: ${loot.scr.toFixed(2)} SCR`,
               components: [combatMenu()]
             });
           }
@@ -894,33 +890,43 @@ async function handleEndlessDungeon(player, initialInteraction, menuMessage, dun
       } else if (interaction.customId === 'explore' && enemyHp <= 0 && !hasExplored) {
         hasExplored = true;
         const exploreLoot = rollForMaterials(floor, enemy.name);
-        Object.keys(exploreLoot).forEach(key => loot[key] += exploreLoot[key]);
+        Object.keys(exploreLoot).forEach(key => loot[key] = (loot[key] || 0) + exploreLoot[key]);
         if (exploreLoot.legendaryItem) player.inventory.misc.push({ name: exploreLoot.legendaryItem });
+        const lootText = Object.entries(loot).filter(([_, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ');
         const nextFloorButton = new ActionRowBuilder()
-                    .addComponents(
+          .addComponents(
             new ButtonBuilder().setCustomId('next_floor').setLabel('Next Floor').setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('leave').setLabel('Leave Dungeon').setStyle(ButtonStyle.Secondary)
           );
         await interaction.update({
-          content: `${player.name}, you scavenge the area and find: ${exploreLoot.slagShards} SS, ${exploreLoot.rustScraps} RS, ${exploreLoot.ashDust} AD, ${exploreLoot.forgeIngots} FI, ${exploreLoot.dustCores} DC, ${exploreLoot.wraithThreads} WT, ${exploreLoot.slagCrystals} SC, ${exploreLoot.ashenRelics} AR, ${exploreLoot.ironVeins} IV, ${exploreLoot.titanEssence} TE${exploreLoot.legendaryItem ? `, ${exploreLoot.legendaryItem}` : ''}\nTotal Loot: ${loot.scr.toFixed(2)} SCR, ${loot.slagShards} SS, ${loot.rustScraps} RS, ${loot.ashDust} AD, ${loot.forgeIngots} FI, ${loot.dustCores} DC, ${loot.wraithThreads} WT, ${loot.slagCrystals} SC, ${loot.ashenRelics} AR, ${loot.ironVeins} IV, ${loot.titanEssence} TE\nContinue deeper or leave?`,
+          content: `**Exploration - ${player.name}**\nFound: ${Object.entries(exploreLoot).filter(([_, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ')}\nTotal Loot: ${lootText}\nContinue or leave?`,
           components: [nextFloorButton]
         });
       } else if (interaction.customId === 'next_floor' && hasExplored) {
+        updateLeaderboard('furthestFloor', userId, floor);
+        updateLeaderboard('mostRounds', userId, rounds);
+        player.furthestFloor = Math.max(player.furthestFloor, floor);
+        player.roundsSurvived = Math.max(player.roundsSurvived, rounds);
         dungeonCollector.stop('next');
         await handleEndlessDungeon(player, interaction, menuMessage, dungeon, floor + 1, userId);
       } else if (interaction.customId === 'flee' || interaction.customId === 'leave') {
+        updateLeaderboard('furthestFloor', userId, floor);
+        updateLeaderboard('mostRounds', userId, rounds);
+        player.furthestFloor = Math.max(player.furthestFloor, floor);
+        player.roundsSurvived = Math.max(player.roundsSurvived, rounds);
+        const lootText = Object.entries(loot).filter(([_, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ');
         await interaction.update({
-          content: `${player.name}, you flee ${dungeon.name} with ${loot.scr.toFixed(2)} SCR, ${loot.slagShards} SS, ${loot.rustScraps} RS, ${loot.ashDust} AD, ${loot.forgeIngots} FI, ${loot.dustCores} DC, ${loot.wraithThreads} WT, ${loot.slagCrystals} SC, ${loot.ashenRelics} AR, ${loot.ironVeins} IV, ${loot.titanEssence} TE! Type !menu to continue.`,
+          content: `**${player.name}**\nFled ${dungeon.name}!\nFloor ${floor}, ${rounds} rounds survived.\nLoot: ${lootText}\nType !menu to continue.`,
           components: []
         });
-        Object.keys(loot).forEach(key => player.active[key] += loot[key]);
+        Object.keys(loot).forEach(key => player.active[key] = (player.active[key] || 0) + loot[key]);
         dungeonCollector.stop('flee');
       }
       saveState();
     } catch (error) {
       console.error(`Dungeon error for ${player.name}:`, error.stack);
-      await interaction.update({ content: `${player.name}, an error occurred! Loot preserved: ${loot.scr.toFixed(2)} SCR. Use !menu to continue.`, components: [] }).catch(() => {});
-      Object.keys(loot).forEach(key => player.active[key] += loot[key]);
+      await interaction.update({ content: `**${player.name}**\nError occurred! Loot preserved: ${loot.scr.toFixed(2)} SCR.\nUse !menu to continue.`, components: [] }).catch(() => {});
+      Object.keys(loot).forEach(key => player.active[key] = (player.active[key] || 0) + loot[key]);
       dungeonCollector.stop('error');
     }
   });
@@ -928,11 +934,16 @@ async function handleEndlessDungeon(player, initialInteraction, menuMessage, dun
   dungeonCollector.on('end', (collected, reason) => {
     console.log(`Dungeon collector ended for ${player.name}. Reason: ${reason}`);
     if (reason === 'time') {
+      updateLeaderboard('furthestFloor', userId, floor);
+      updateLeaderboard('mostRounds', userId, rounds);
+      player.furthestFloor = Math.max(player.furthestFloor, floor);
+      player.roundsSurvived = Math.max(player.roundsSurvived, rounds);
+      const lootText = Object.entries(loot).filter(([_, v]) => v).map(([k, v]) => `${k}: ${v}`).join(', ');
       menuMessage.edit({
-        content: `${player.name}, time’s up in ${dungeon.name}! Loot preserved: ${loot.scr.toFixed(2)} SCR, ${loot.slagShards} SS, ${loot.rustScraps} RS, ${loot.ashDust} AD, ${loot.forgeIngots} FI, ${loot.dustCores} DC, ${loot.wraithThreads} WT, ${loot.slagCrystals} SC, ${loot.ashenRelics} AR, ${loot.ironVeins} IV, ${loot.titanEssence} TE. Type !menu to continue.`,
+        content: `**${player.name}**\nTime’s up in ${dungeon.name}!\nFloor ${floor}, ${rounds} rounds survived.\nLoot: ${lootText}\nType !menu to continue.`,
         components: []
       }).catch(err => console.error('Failed to edit on dungeon end:', err));
-      Object.keys(loot).forEach(key => player.active[key] += loot[key]);
+      Object.keys(loot).forEach(key => player.active[key] = (player.active[key] || 0) + loot[key]);
       saveState();
     }
   });
